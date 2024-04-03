@@ -1,0 +1,1 @@
+# Test.Kotova.ServerSide. ASP.NET Core Web API
