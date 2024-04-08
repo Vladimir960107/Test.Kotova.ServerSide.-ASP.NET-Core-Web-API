@@ -38,6 +38,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 "application/vnd.ms-excel",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             };
+            var originalFileName = Path.GetFileNameWithoutExtension(file.FileName);
             var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
 
             bool isPermittedMimeType = permittedMimeTypes.Contains(file.ContentType);
@@ -75,21 +76,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 // Ensure the directory exists
                 var directory = Path.GetDirectoryName(path);
+                if (directory is null)
+                {
+                    throw new Exception("directory for UploadedFiles is empty");
+                }
                 if (!Directory.Exists(directory))
                 {
-                    if (directory is null)
-                    {
-                        throw new Exception("directory for UploadedFiles is empty");
-                    }
                     Directory.CreateDirectory(directory);
                 }
-
-                using (var stream = new FileStream(path, FileMode.Create))
+                var filePath = path;
+                for (int i = 1; System.IO.File.Exists(filePath); i++)
                 {
-                    await file.CopyToAsync(stream);
+                    var newFileName = $"{originalFileName}({i}){extension}";
+                    filePath = Path.Combine(directory, newFileName);
                 }
 
-                return Ok(new { file.FileName, file.Length });
+                using (var fileStream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(fileStream);
+                }
+
+                return Ok(new { FileName = Path.GetFileName(filePath), file.Length });
             }
             catch (Exception ex)
             {
