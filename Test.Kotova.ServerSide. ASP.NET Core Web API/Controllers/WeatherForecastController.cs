@@ -2,6 +2,7 @@ using DocumentFormat.OpenXml.Drawing;
 using Microsoft.AspNetCore.Mvc;
 using Path = System.IO.Path;
 
+
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
     [ApiController]
@@ -136,41 +137,73 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         [HttpGet("download-newest")]
         public IActionResult DownloadNewestFile()
-        {   try
+        {    
+            try
             {
                 Response.Headers.Add("X-Content-Type-Options", "nosniff"); // FOR SECURITY
-                var directoryPath = Path.Combine(Directory.GetCurrentDirectory(), "UploadedFiles");
-
-                // Ensure the directory exists
-                if (!Directory.Exists(directoryPath))
-                {
-                    return NotFound("Directory not found.");
-                }
-
-                var directoryInfo = new DirectoryInfo(directoryPath);
-                // Get all files in the directory, ordered by last write time descending
-                var newestFile = directoryInfo.GetFiles()
-                                               .OrderByDescending(f => f.LastWriteTime)
-                                               .FirstOrDefault();
-
-                if (newestFile == null)
-                {
-                    return NotFound("No files found in the directory.");
-                }
-
-                string mimeType = Path.GetExtension(newestFile.FullName).ToLowerInvariant() switch
+                string filePath = GetNewestExcelFilePath(); // Use the new method
+                string mimeType = Path.GetExtension(filePath).ToLowerInvariant() switch
                 {
                     ".xls" => "application/vnd.ms-excel",
                     ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     _ => throw new InvalidOperationException("Unsupported file type.")
                 };
-                var fileStream = new FileStream(newestFile.FullName, FileMode.Open, FileAccess.Read);
-                return File(fileStream, mimeType, newestFile.Name);
+
+                var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                return File(fileStream, mimeType, Path.GetFileName(filePath));
+            }
+            catch (FileNotFoundException ex)
+            {
+                return NotFound(ex.Message);
             }
             catch (Exception ex) when (ex is InvalidOperationException || ex is IOException)
             {
-                return BadRequest($"An error occurred while processing your request:{ex.Message}");
+                return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
+        }
+
+
+        [HttpGet("ImportIntoDB")]
+        public IActionResult ImportIntoDB()
+        {
+            try
+            {
+                string excelFilePath = GetNewestExcelFilePath(); // Use the new method
+                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB();
+                example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
+                return Ok();
+            }
+            catch (FileNotFoundException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"An error occurred while processing your request: {ex.Message}");
+            }
+        }
+
+        private string GetNewestExcelFilePath()
+        {
+            var directoryPath = Path.Combine(Directory.GetCurrentDirectory(), "UploadedFiles");
+            if (!Directory.Exists(directoryPath))
+            {
+                throw new FileNotFoundException("Directory not found.");
+            }
+
+            var directoryInfo = new DirectoryInfo(directoryPath);
+            var newestFile = directoryInfo.EnumerateFiles()
+                              .Where(f => f.Extension.Equals(".xls", StringComparison.OrdinalIgnoreCase)
+                                       || f.Extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+                              .OrderByDescending(f => f.LastWriteTime)
+                              .FirstOrDefault();
+
+            if (newestFile == null)
+            {
+                throw new FileNotFoundException("No Excel files found in the directory.");
+            }
+
+            return newestFile.FullName;
         }
     }
 }
