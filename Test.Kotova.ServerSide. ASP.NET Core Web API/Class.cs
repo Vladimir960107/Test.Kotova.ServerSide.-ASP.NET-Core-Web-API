@@ -57,12 +57,12 @@ class ImportFromExcelIntoDB
         return $"Server={server};Database={database};Integrated Security=True;";
     }
 
-    private static string GetExcelFilePath()
+    private string GetExcelFilePath()
     {
         string[] excelFilePaths = { @"C:\", "Users", "hifly", "Desktop", "Котова", "TEST Для базы данных.xlsx" };
         return Path.Combine(excelFilePaths);
     }
-    public static string GetTableName()
+    public string GetTableName()
     {
         return "dbo.TableTest";
     }
@@ -278,6 +278,7 @@ class ImportFromExcelIntoDB
             command.ExecuteNonQuery(); // Execute the command
         }
     }
+    
 
     public class SqlInsertCommandBuilder
     {
