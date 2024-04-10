@@ -162,15 +162,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        [HttpGet("sync-names-with-db")]
+        public IActionResult SyncNamesWithDB()
+        {
+            try
+            {
+                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
+                //List<string>names = GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                //example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"An error occurred while processing your request: {ex.Message}");
+            }
+        }
 
-        [HttpGet("ImportIntoDB")]
+        [HttpGet("import-into-db")]
         public IActionResult ImportIntoDB()
         {
             try
             {
                 string excelFilePath = GetNewestExcelFilePath(); // Use the new method
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB();
-                example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
+                example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath); 
                 return Ok();
             }
             catch (FileNotFoundException ex)
@@ -182,7 +197,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
         }
-
         private string GetNewestExcelFilePath()
         {
             var directoryPath = Path.Combine(Directory.GetCurrentDirectory(), "UploadedFiles");
