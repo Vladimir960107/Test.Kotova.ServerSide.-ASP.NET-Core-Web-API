@@ -121,6 +121,7 @@ class ImportFromExcelIntoDB
             InsertRowDataIntoDatabase(rowData, connection, transaction);
         }
     }
+    //here put the function needed. for sync names with db
 
     class RowData
     {

@@ -31,8 +31,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
 
-            //CHECK FOR Path Traversal Attacks!
-
 
 
             if (file == null || file.Length == 0)
@@ -93,11 +91,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 int index = DetermineNextFileIndex(directoryPath);
 
                 // Construct the new file name
-                string extension = Path.GetExtension(file.FileName);
-                string newFileName = $"StandardName_{index}_{file.FileName}";
+                string newFileName = $"StandardName_{index}{extensionToLower}";
                 string fullPath = Path.Combine(directoryPath, newFileName);
-
-                    // Save the file
+                // Added: Path traversal check!!! turn on if directory path changes.
+                /*
+                if (!Path.GetFullPath(fullPath).StartsWith(Path.GetFullPath(directoryPath))) // Added: Path traversal check
+                {
+                    return BadRequest("Invalid file path entered. (Path traversal attack)");
+                }
+                */
+                // Save the file
                 using (var stream = new FileStream(fullPath, FileMode.Create))
                 {
                     await file.CopyToAsync(stream);
@@ -168,7 +171,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
-                //List<string>names = GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                List<string>names = GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
                 //example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
                 return Ok();
             }
