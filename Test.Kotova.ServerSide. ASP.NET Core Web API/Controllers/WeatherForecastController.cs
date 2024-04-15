@@ -1,5 +1,7 @@
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Office2016.Drawing.Command;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Models;
 using Path = System.IO.Path;
 
 
@@ -26,7 +28,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             return Ok("Hello, World!");
         }
-
+        
         [HttpPost("upload")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
@@ -172,14 +174,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
                 List<string>names = example.GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
-                //example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
-                return Ok();
+                return Ok(EncryptListOfStrings(names));
             }
             catch (Exception ex)
             {
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
         }
+
+        [HttpGet("sync-instructions-with-db")] //Make this load every 1 minute or something.!!!!!
+        public IActionResult SyncInstructionsWithDB()
+        {
+            try
+            {
+                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
+                List<Notification> names = example.GetInstructions(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"An error occurred while processing your request: {ex.Message}");
+            }
+        }
+
+
 
         [HttpGet("import-into-db")]
         public IActionResult ImportIntoDB()
@@ -221,6 +239,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             return newestFile.FullName;
+        }
+        private string EncryptString(string clearText)
+        {
+            return clearText;
+        }
+
+        private List<string> EncryptListOfStrings(List<string> clearList)
+        {
+            List<string> encryptedList = new List<string>();
+            foreach (string str in clearList)
+            {
+                encryptedList.Add(EncryptString(str));
+            }
+            return encryptedList;
         }
     }
 }

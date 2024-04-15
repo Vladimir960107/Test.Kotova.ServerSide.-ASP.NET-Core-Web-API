@@ -14,7 +14,6 @@ using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Presentation;
 using System.Reflection;
 
-
 class ImportFromExcelIntoDB
 {
 
@@ -30,6 +29,7 @@ class ImportFromExcelIntoDB
     private const string tableName_sql_group = "group";
 
     private const string tableName_sql = "dbo.TableTest";
+    private const string tableName_Notifications_sql = "dbo.Notifications";
     //PUT here another tablename from notifications.
     /*
     static void Main(string[] args)
@@ -138,7 +138,7 @@ class ImportFromExcelIntoDB
                 {
                     while (reader.Read()) // Read each row returned by the query
                     {
-                        var name = reader["name"] as string; // Safely cast to string, which will be null if the value is DBNull
+                        var name = reader[tableName_sql_names] as string; // Safely cast to string, which will be null if the value is DBNull
                         if (name != null)
                         {
                             names.Add(name);
@@ -154,18 +154,23 @@ class ImportFromExcelIntoDB
 
         return names; // Return the list of names
     }
+    public List<Notification> GetInstructions(string connectionString)
+    {
+        var instructions = new List<Notification>(); //CONTINUE FROM HERE!
+        return instructions;
+    }
 
     class RowData
     {
-        public string Name { get; set; }
+        public string? Name { get; set; }
 
-        public string JobPosition { get; set; }
+        public string? JobPosition { get; set; }
         public Int16 IsDriver { get; set; }
         public DateTime BirthDate { get; set; }
         public Int16 Gender { get; set; }
-        public string PersonnelNumber { get; set; }
-        public string Department { get; set; }
-        public string Group { get; set; }
+        public string? PersonnelNumber { get; set; }
+        public string? Department { get; set; }
+        public string? Group { get; set; }
         // Add other properties as needed...
     }
     bool TryParseRowAndValidate(IXLRangeRow row, out RowData rowData, SqlConnection connection, SqlTransaction transaction, Dictionary<string, int> columnNumbers, int counter)
@@ -377,4 +382,14 @@ class ImportFromExcelIntoDB
             return result == 0; // return true if the value does not exist in the database
         }
     }
+}
+public class Notification
+{
+    public string? NotificationID { get; set; }
+
+    public DateTime BeginDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public bool IsForDrivers { get; set; }
+    public string? PathToInstruction { get; set; }
+    public string? NameOfInstruction { get; set; }
 }
