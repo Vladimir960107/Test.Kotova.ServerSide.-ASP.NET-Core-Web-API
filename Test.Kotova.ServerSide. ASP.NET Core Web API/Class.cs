@@ -30,6 +30,7 @@ class ImportFromExcelIntoDB
     private const string tableName_sql_group = "group";
 
     private const string tableName_sql = "dbo.TableTest";
+    //PUT here another tablename from notifications.
     /*
     static void Main(string[] args)
     {
@@ -122,6 +123,37 @@ class ImportFromExcelIntoDB
         }
     }
     //here put the function needed. for sync names with db
+    public List<string> GetNames(string connectionString)
+    {
+        var names = new List<string>(); // Prepare a list to store the retrieved names
+
+        using (var connection = new SqlConnection(connectionString))
+        {
+            connection.Open(); // Open the database connection
+            var query = $"SELECT {tableName_sql_names} FROM {tableName_sql}"; // SQL query to retrieve names
+
+            using (var command = new SqlCommand(query, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) // Read each row returned by the query
+                    {
+                        var name = reader["name"] as string; // Safely cast to string, which will be null if the value is DBNull
+                        if (name != null)
+                        {
+                            names.Add(name);
+                        }
+                        else
+                        {
+                            // Optionally handle or log null values here
+                        }
+                    }
+                }
+            }
+        }
+
+        return names; // Return the list of names
+    }
 
     class RowData
     {
@@ -333,9 +365,9 @@ class ImportFromExcelIntoDB
         return number.ToString("D10");
     }
 
-    //just to check whether the index already exist in the database (method)
     private bool CheckIfAlreadyExistsInDB(SqlConnection connection, SqlTransaction transaction, string tableName, string columnName, object valueToCheck)
     {
+        //just to check whether the index already exist in the database (method)
         string query = $"SELECT COUNT(*) FROM {tableName} WHERE [{columnName}] = @numberToCheck";
 
         using (SqlCommand command = new SqlCommand(query, connection, transaction))

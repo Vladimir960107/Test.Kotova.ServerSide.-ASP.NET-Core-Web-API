@@ -171,7 +171,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
-                List<string>names = GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                List<string>names = example.GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
                 //example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath);
                 return Ok();
             }
