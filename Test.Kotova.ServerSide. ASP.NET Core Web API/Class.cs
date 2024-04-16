@@ -40,14 +40,20 @@ class ImportFromExcelIntoDB
 
     private const string tableName_sql = "dbo.TableTest";
     private const string tableName_Notifications_sql = "dbo.Notifications";
+    private string connectionString_server = null;
+    private string connectionString_database = null;
+
 
     public string GetConnectionString()
     {
-        string server = "localhost";
-        string database = "TestDB";
+        if (connectionString_server is null && connectionString_database is null) 
+        {
+            connectionString_server = "localhost";
+            connectionString_database = "TestDB";
+        }
 
         // Use Windows Authentication for simplicity and security
-        return $"Server={server};Database={database};Integrated Security=True;";
+        return $"Server={connectionString_server};Database={connectionString_database};Integrated Security=True;";
     }
 
     private string GetExcelFilePath()
@@ -401,6 +407,26 @@ class ImportFromExcelIntoDB
             command.Parameters.AddWithValue("@numberToCheck", valueToCheck);
             int result = Convert.ToInt32(command.ExecuteScalar());
             return result == 0; // return true if the value does not exist in the database
+        }
+    }
+    public void CreateTable(string tableName)
+    {
+        // Basic validation to ensure table name is alphanumeric (simple example)
+        //if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-zA-Z0-9]+$"))
+        if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[0-9]+$"))
+        {
+            throw new ArgumentException("Table name must be numeric.");
+        }
+
+        string sql = $"IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName) " +
+                     $"CREATE TABLE [{tableName}] (ID INT PRIMARY KEY, SampleColumn1 VARCHAR(100), SampleColumn2 INT);";
+
+        using (SqlConnection conn = new SqlConnection(GetConnectionString()))
+        {
+            SqlCommand cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tableName", tableName);
+            conn.Open();
+            cmd.ExecuteNonQuery();
         }
     }
 }
