@@ -1,4 +1,10 @@
-﻿namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
+﻿
+
+
+using Kotova.CommonClasses;
+
+
+//namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 using System;
 using System.Data.SqlClient;
 using System.Globalization;
@@ -13,6 +19,8 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Presentation;
 using System.Reflection;
+
+
 
 class ImportFromExcelIntoDB
 {
@@ -32,24 +40,6 @@ class ImportFromExcelIntoDB
 
     private const string tableName_sql = "dbo.TableTest";
     private const string tableName_Notifications_sql = "dbo.Notifications";
-    //PUT here another tablename from notifications.
-    /*
-    static void Main(string[] args)
-    {
-        string connectionString = GetConnectionString();
-        string excelFilePath = GetExcelFilePath();
-
-        try
-        {
-            ImportDataFromExcel(connectionString, excelFilePath);
-            Console.WriteLine("Data imported successfully.");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"An error occurred during the import: {ex.Message}");
-        }
-    }
-    */
 
     public string GetConnectionString()
     {
@@ -414,20 +404,5 @@ class ImportFromExcelIntoDB
         }
     }
 }
-public class Notification
-{
-    public string? NotificationID { get; set; }
 
-    public DateTime BeginDate { get; set; }
-    public DateTime EndDate { get; set; }
-    public bool IsForDrivers { get; set; }
-    public string? PathToInstruction { get; set; }
-    public string? NameOfInstruction { get; set; }
-
-    public Notification() { }
-    public Notification(string NameOfInstruction_)
-    {
-        NameOfInstruction = NameOfInstruction_;
-    }
-}
 

@@ -15,4 +15,10 @@
     <PackageReference Include="System.Data.SqlClient" Version="4.8.6" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="Kotova.CommonClasses">
+      <HintPath>..\..\Kotova.CommonClasses\Kotova.CommonClasses\bin\Debug\net6.0\Kotova.CommonClasses.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>
