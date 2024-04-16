@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml.Office2016.Drawing.Command;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Models;
 using Path = System.IO.Path;
+using Newtonsoft.Json;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
@@ -188,7 +189,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
-                List<Notification> names = example.GetInstructions(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                List<Notification> notifications = example.GetInstructions(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                string serialized = JsonConvert.SerializeObject(notifications);
+                string encryptedData = EncryptString(serialized);
+                return Ok(encryptedData);
 
             }
             catch (Exception ex)
@@ -240,12 +244,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             return newestFile.FullName;
         }
-        private string EncryptString(string clearText)
+        private string EncryptString(string clearText) // use AES or something! encrypt and transfer over https.
         {
             return clearText;
         }
 
-        private List<string> EncryptListOfStrings(List<string> clearList)
+        private List<string> EncryptListOfStrings(List<string> clearList) // use json serealize list of strings into one strings or something.
         {
             List<string> encryptedList = new List<string>();
             foreach (string str in clearList)

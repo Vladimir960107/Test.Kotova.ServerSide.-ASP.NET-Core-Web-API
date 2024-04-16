@@ -28,6 +28,8 @@ class ImportFromExcelIntoDB
     private const string tableName_sql_department = "department";
     private const string tableName_sql_group = "group";
 
+    private const string tableName_sql_instructions_names = "NameOfInstruction";
+
     private const string tableName_sql = "dbo.TableTest";
     private const string tableName_Notifications_sql = "dbo.Notifications";
     //PUT here another tablename from notifications.
@@ -156,8 +158,36 @@ class ImportFromExcelIntoDB
     }
     public List<Notification> GetInstructions(string connectionString)
     {
-        var instructions = new List<Notification>(); //CONTINUE FROM HERE!
-        return instructions;
+        var instructions = new List<Notification>(); 
+        using (var connection = new SqlConnection(connectionString))
+        {
+            connection.Open(); // Open the database connection
+            var query = $"SELECT {tableName_sql_instructions_names} FROM {tableName_Notifications_sql}"; // SQL query to retrieve names
+
+            using (var command = new SqlCommand(query, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read()) // Read each row returned by the query
+                    {
+                        //CONTINUE FROM HERE!
+                        var name = reader[tableName_sql_instructions_names] as string; // Safely cast to string, which will be null if the value is DBNull
+                        if (name != null)
+                        {
+                            Notification notification = new Notification(name);
+                            instructions.Add(notification);
+                            
+                        }
+                        else
+                        {
+                            // Optionally handle or log null values here
+                        }
+                    }
+                }
+            }
+        }
+
+        return instructions; // Return the list of instructions
     }
 
     class RowData
@@ -173,6 +203,7 @@ class ImportFromExcelIntoDB
         public string? Group { get; set; }
         // Add other properties as needed...
     }
+    
     bool TryParseRowAndValidate(IXLRangeRow row, out RowData rowData, SqlConnection connection, SqlTransaction transaction, Dictionary<string, int> columnNumbers, int counter)
     {
         try
@@ -392,4 +423,11 @@ public class Notification
     public bool IsForDrivers { get; set; }
     public string? PathToInstruction { get; set; }
     public string? NameOfInstruction { get; set; }
+
+    public Notification() { }
+    public Notification(string NameOfInstruction_)
+    {
+        NameOfInstruction = NameOfInstruction_;
+    }
 }
+
