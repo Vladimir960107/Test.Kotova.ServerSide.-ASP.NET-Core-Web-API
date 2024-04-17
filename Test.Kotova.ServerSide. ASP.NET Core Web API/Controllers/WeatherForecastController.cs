@@ -167,9 +167,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                DBConnection example = new DBConnection(); // Rename class into something more accurate, if you can.
+                DBProcessor example = new DBProcessor(); // Rename class into something more accurate, if you can.
                 List<string>names = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
-                return Ok(EncryptListOfStrings(names));
+                return Ok(Encryption_Kotova.EncryptListOfStrings(names));
             }
             catch (Exception ex)
             {
@@ -182,10 +182,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                DBConnection example = new DBConnection();
+                DBProcessor example = new DBProcessor();
                 List<Notification> notifications = example.GetInstructions(example.GetConnectionString());
                 string serialized = JsonConvert.SerializeObject(notifications);
-                string encryptedData = EncryptString(serialized);
+                string encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
 
             }
@@ -203,7 +203,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 string excelFilePath = GetNewestExcelFilePath(); 
-                DBConnection example = new DBConnection();
+                DBProcessor example = new DBProcessor();
                 example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath); 
                 return Ok();
             }
@@ -216,6 +216,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
         }
+
         private string GetNewestExcelFilePath()
         {
             var directoryPath = Path.Combine(Directory.GetCurrentDirectory(), "UploadedFiles");
@@ -238,19 +239,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             return newestFile.FullName;
         }
-        private string EncryptString(string clearText) // use AES or something! encrypt and transfer over https.
-        {
-            return clearText;
-        }
 
-        private List<string> EncryptListOfStrings(List<string> clearList) // use json serealize list of strings into one strings or something.
-        {
-            List<string> encryptedList = new List<string>();
-            foreach (string str in clearList)
-            {
-                encryptedList.Add(EncryptString(str));
-            }
-            return encryptedList;
-        }
+
+        
     }
 }
+#region Encryption
+public class Encryption_Kotova
+{
+    // Business logic methods here
+    public static string EncryptString(string clearText) // use AES or something! encrypt and transfer over https.
+    {
+        return clearText;
+    }
+    public static List<string> EncryptListOfStrings(List<string> clearList) // use json serealize list of strings into one strings or something.
+    {
+        List<string> encryptedList = new List<string>();
+        foreach (string str in clearList)
+        {
+            encryptedList.Add(EncryptString(str));
+        }
+        return encryptedList;
+    }
+}
+#endregion
