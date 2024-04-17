@@ -4,7 +4,7 @@
 using Kotova.CommonClasses;
 
 
-//namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
+
 using System;
 using System.Data.SqlClient;
 using System.Globalization;
@@ -21,7 +21,7 @@ using DocumentFormat.OpenXml.Presentation;
 using System.Reflection;
 
 
-
+namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 class ImportFromExcelIntoDB
 {
 
@@ -110,8 +110,18 @@ class ImportFromExcelIntoDB
                 // Log and skip the row if parsing failed
                 continue;
             }
+            transaction.Save("SavePoint1");
+            try
+            {
+                InsertRowDataIntoDatabase(rowData, connection, transaction); // HERE IS THE BIG PROBLEM WITH TRYPARSE function AND SYNCING IT WITH THIS INSERTROWDATA function(and additionally createtable)
+                CreateTable(rowData.PersonnelNumber);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"something wrong with CreateTable(or maybe InsertingRowDataIntoDatabase).{ex.Message}");
+                throw;
+            }
 
-            InsertRowDataIntoDatabase(rowData, connection, transaction);
         }
     }
     //here put the function needed. for sync names with db
@@ -405,6 +415,11 @@ class ImportFromExcelIntoDB
     }
     public void CreateTable(string tableName)
     {
+        
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name is null or empty");
+        }
         // Basic validation to ensure table name is alphanumeric (simple example)
         //if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-zA-Z0-9]+$"))
         if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[0-9]+$"))
@@ -413,7 +428,7 @@ class ImportFromExcelIntoDB
         }
 
         string sql = $"IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName) " +
-                     $"CREATE TABLE [{tableName}] (ID INT PRIMARY KEY, SampleColumn1 VARCHAR(100), SampleColumn2 INT);";
+                     $"CREATE TABLE [{tableName}] (ID INT PRIMARY KEY,  SampleColumn1 INT);";
 
         using (SqlConnection conn = new SqlConnection(GetConnectionString()))
         {
@@ -422,6 +437,7 @@ class ImportFromExcelIntoDB
             conn.Open();
             cmd.ExecuteNonQuery();
         }
+        Console.WriteLine($"Table {tableName} created successfully!");
     }
 }
 

@@ -30,13 +30,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             return Ok("Hello, World!");
         }
-        
+
         [HttpPost("upload")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
-
-
-
             if (file == null || file.Length == 0)
                 return BadRequest("Please upload a file.");
 
@@ -209,7 +206,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                string excelFilePath = GetNewestExcelFilePath(); // Use the new method
+                string excelFilePath = GetNewestExcelFilePath(); 
                 ImportFromExcelIntoDB example = new ImportFromExcelIntoDB();
                 example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath); 
                 return Ok();
