@@ -22,7 +22,7 @@ using System.Reflection;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
-class ImportFromExcelIntoDB
+class DBConnection
 {
 
     private const double DEVIATION = 0.00001;

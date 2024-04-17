@@ -141,7 +141,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 Response.Headers.Add("X-Content-Type-Options", "nosniff"); // FOR SECURITY
-                string filePath = GetNewestExcelFilePath(); // Use the new method
+                string filePath = GetNewestExcelFilePath(); 
                 string mimeType = Path.GetExtension(filePath).ToLowerInvariant() switch
                 {
                     ".xls" => "application/vnd.ms-excel",
@@ -167,8 +167,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
-                List<string>names = example.GetNames(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                DBConnection example = new DBConnection(); // Rename class into something more accurate, if you can.
+                List<string>names = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
                 return Ok(EncryptListOfStrings(names));
             }
             catch (Exception ex)
@@ -182,8 +182,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB(); // Rename class into DBInformation or something.
-                List<Notification> notifications = example.GetInstructions(example.GetConnectionString()); // Where to add functions, from example or здесь создать эту функцию?
+                DBConnection example = new DBConnection();
+                List<Notification> notifications = example.GetInstructions(example.GetConnectionString());
                 string serialized = JsonConvert.SerializeObject(notifications);
                 string encryptedData = EncryptString(serialized);
                 return Ok(encryptedData);
@@ -203,7 +203,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 string excelFilePath = GetNewestExcelFilePath(); 
-                ImportFromExcelIntoDB example = new ImportFromExcelIntoDB();
+                DBConnection example = new DBConnection();
                 example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath); 
                 return Ok();
             }
