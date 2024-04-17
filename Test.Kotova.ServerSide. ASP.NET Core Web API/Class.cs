@@ -124,7 +124,6 @@ class ImportFromExcelIntoDB
 
         }
     }
-    //here put the function needed. for sync names with db
     public List<string> GetNames(string connectionString)
     {
         var names = new List<string>(); // Prepare a list to store the retrieved names
@@ -156,22 +155,21 @@ class ImportFromExcelIntoDB
 
         return names; // Return the list of names
     }
-    public List<Notification> GetInstructions(string connectionString)
+    public List<Notification> GetInstructions(string connectionString) //This function is similar to GetNames
     {
         var instructions = new List<Notification>(); 
         using (var connection = new SqlConnection(connectionString))
         {
-            connection.Open(); // Open the database connection
-            var query = $"SELECT {tableName_sql_instructions_names} FROM {tableName_Notifications_sql}"; // SQL query to retrieve names
+            connection.Open(); 
+            var query = $"SELECT {tableName_sql_instructions_names} FROM {tableName_Notifications_sql}"; 
 
             using (var command = new SqlCommand(query, connection))
             {
                 using (var reader = command.ExecuteReader())
                 {
-                    while (reader.Read()) // Read each row returned by the query
+                    while (reader.Read()) 
                     {
-                        //CONTINUE FROM HERE!
-                        var name = reader[tableName_sql_instructions_names] as string; // Safely cast to string, which will be null if the value is DBNull
+                        var name = reader[tableName_sql_instructions_names] as string; 
                         if (name != null)
                         {
                             Notification notification = new Notification(name);
@@ -187,7 +185,7 @@ class ImportFromExcelIntoDB
             }
         }
 
-        return instructions; // Return the list of instructions
+        return instructions; 
     }
 
     class RowData
@@ -332,7 +330,7 @@ class ImportFromExcelIntoDB
     {
         using (var command = connection.CreateCommand())
         {
-            command.Transaction = transaction; // Assign the transaction
+            command.Transaction = transaction; // Assign the transaction (chatGPT wrote this)
             var builder = new SqlInsertCommandBuilder(tableName_sql);
             builder.AddColumnValue(tableName_sql_names, rowData.Name);
             builder.AddColumnValue(tableName_sql_BirthDate, rowData.BirthDate);
@@ -343,8 +341,8 @@ class ImportFromExcelIntoDB
             builder.AddColumnValue(tableName_sql_group, rowData.Group);
             builder.AddColumnValue(tableName_sql_isDriver, rowData.IsDriver);
 
-            builder.ApplyToCommand(command); // This line prepares the command text and parameters
-            command.ExecuteNonQuery(); // Execute the command
+            builder.ApplyToCommand(command); // This line prepares the command text and parameters (chatGPT wrote this)
+            command.ExecuteNonQuery(); // Execute the command (chatGPT wrote this)
         }
     }
     

@@ -79,7 +79,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 var directoryPath = Path.Combine(Directory.GetCurrentDirectory(), "UploadedFiles");
 
-                // Ensure the directory exists
                 if (directoryPath is null)
                 {
                     throw new Exception("directory for UploadedFiles is empty");
@@ -111,9 +110,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             catch (Exception ex)
             {
-                // Log the exception here
-
-                // Return the exception details
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
