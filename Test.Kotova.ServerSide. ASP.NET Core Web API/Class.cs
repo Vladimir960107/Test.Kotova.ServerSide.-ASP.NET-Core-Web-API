@@ -40,18 +40,12 @@ class ImportFromExcelIntoDB
 
     private const string tableName_sql = "dbo.TableTest";
     private const string tableName_Notifications_sql = "dbo.Notifications";
-    private string connectionString_server = null;
-    private string connectionString_database = null;
+    private const string connectionString_server = "localhost";
+    private const string connectionString_database = "TestDB";
 
 
     public string GetConnectionString()
     {
-        if (connectionString_server is null && connectionString_database is null) 
-        {
-            connectionString_server = "localhost";
-            connectionString_database = "TestDB";
-        }
-
         // Use Windows Authentication for simplicity and security
         return $"Server={connectionString_server};Database={connectionString_database};Integrated Security=True;";
     }
