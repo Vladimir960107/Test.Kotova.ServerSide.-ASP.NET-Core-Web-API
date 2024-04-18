@@ -29,14 +29,14 @@ class DBProcessor
     private const string tableName_sql_index = "index";
     private const string tableName_sql_names = "names";
     private const string tableName_sql_jobPosition = "job_position";
-    private const string tableName_sql_isDriver = "isDriver";
-    private const string tableName_sql_BirthDate = "BirthDate";
+    private const string tableName_sql_isDriver = "is_driver";
+    private const string tableName_sql_BirthDate = "birth_date";
     private const string tableName_sql_gender = "gender";
     private const string tableName_sql_PN = "personnel_number";
     private const string tableName_sql_department = "department";
     private const string tableName_sql_group = "group";
 
-    private const string tableName_sql_instructions_names = "NameOfInstruction";
+    private const string tableName_sql_instructions_names = "name_of_instruction";
 
     private const string tableName_sql = "dbo.TableTest";
     private const string tableName_Notifications_sql = "dbo.Notifications";
