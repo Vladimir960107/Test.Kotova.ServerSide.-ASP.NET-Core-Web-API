@@ -19,6 +19,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Presentation;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -60,35 +61,33 @@ class DBProcessor
         return "dbo.TableTest";
     }
 
-    public void ImportDataFromExcel(string connectionString, string excelFilePath)
+    public async Task ImportDataFromExcelAsync(string connectionString, string excelFilePath)
     {
         using (var workbook = new XLWorkbook(excelFilePath))
         {
             var worksheet = workbook.Worksheet(1);
 
-
-
             using (var connection = new SqlConnection(connectionString))
             {
-                connection.Open();
+                await connection.OpenAsync();
                 using (SqlTransaction transaction = connection.BeginTransaction())
                 {
                     try
                     {
-                        ProcessWorksheetRows(worksheet, connection, transaction);
+                        await ProcessWorksheetRowsAsync(worksheet, connection, transaction);
                         transaction.Commit();
                     }
                     catch
                     {
                         transaction.Rollback();
-                        throw; // Re-throw the exception to be handled by the caller of ImportDataFromExcel
+                        throw;
                     }
                 }
             }
         }
     }
 
-    private void ProcessWorksheetRows(IXLWorksheet worksheet, SqlConnection connection, SqlTransaction transaction)
+    private async Task ProcessWorksheetRowsAsync(IXLWorksheet worksheet, SqlConnection connection, SqlTransaction transaction)
     {
         var columnNumbersExcel = new Dictionary<string, int>
         {
@@ -101,6 +100,7 @@ class DBProcessor
             { "gender", 8 },
             { "personnelNumber", 9 },
         };
+        List<RowData> rowsParsed = new List<RowData>();
         int counter = 0;
         foreach (var row in worksheet.RangeUsed().Rows())
         {
@@ -110,20 +110,88 @@ class DBProcessor
                 // Log and skip the row if parsing failed
                 continue;
             }
-            transaction.Save("SavePoint1");
             try
             {
-                InsertRowDataIntoDatabase(rowData, connection, transaction); // HERE IS THE BIG PROBLEM WITH TRYPARSE function AND SYNCING IT WITH THIS INSERTROWDATA function(and additionally createtable)
-                CreateTable(rowData.PersonnelNumber);
+                await InsertRowDataIntoDatabaseAsync(rowData, connection, transaction);
+                rowsParsed.Add(rowData);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"something wrong with CreateTable(or maybe InsertingRowDataIntoDatabase).{ex.Message}");
+                Console.WriteLine($"Error inserting row data: {ex.Message}");
                 throw;
             }
+        }
+        try
+        {
+            await CreateTablesForParsedRowsAsync(rowsParsed);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error creating tables: {ex.Message}");
+            throw;
+        }
 
+    }
+
+    private async Task CreateTablesForParsedRowsAsync(List<RowData> rowsParsed)
+    {
+        foreach (var rowData in rowsParsed)
+        {
+            await CreateTableAsync(rowData.PersonnelNumber);
         }
     }
+
+    public async Task CreateTableAsync(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            throw new ArgumentException("Table name is null or empty");
+        }
+
+        if (!Regex.IsMatch(tableName, @"^[0-9]+$"))
+        {
+            throw new ArgumentException("Table name must be numeric.");
+        }
+
+        string sql = $"IF EXISTS (SELECT * FROM sys.tables WHERE name = @tableName) " +
+                     $"BEGIN " +
+                     $"  PRINT 'Table {tableName} already exists.'; " +
+                     $"END " +
+                     $"ELSE " +
+                     $"BEGIN " +
+                     $"  CREATE TABLE [{tableName}] (ID INT PRIMARY KEY, SampleColumn1 INT); " +
+                     $"  PRINT 'Table {tableName} created successfully!'; " +
+                     $"END";
+
+        using (SqlConnection conn = new SqlConnection(GetConnectionString()))
+        {
+            SqlCommand cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@tableName", tableName);
+            await conn.OpenAsync();
+            using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    Console.WriteLine(reader[0].ToString());
+                }
+            }
+        }
+    }
+
+    class RowData
+    {
+        public string? Name { get; set; }
+
+        public string? JobPosition { get; set; }
+        public Int16 IsDriver { get; set; }
+        public DateTime BirthDate { get; set; }
+        public Int16 Gender { get; set; }
+        public string? PersonnelNumber { get; set; }
+        public string? Department { get; set; }
+        public string? Group { get; set; }
+        // Add other properties as needed...
+    }
+
     public List<string> GetNames(string connectionString)
     {
         var names = new List<string>(); // Prepare a list to store the retrieved names
@@ -186,20 +254,6 @@ class DBProcessor
         }
 
         return instructions; 
-    }
-
-    class RowData
-    {
-        public string? Name { get; set; }
-
-        public string? JobPosition { get; set; }
-        public Int16 IsDriver { get; set; }
-        public DateTime BirthDate { get; set; }
-        public Int16 Gender { get; set; }
-        public string? PersonnelNumber { get; set; }
-        public string? Department { get; set; }
-        public string? Group { get; set; }
-        // Add other properties as needed...
     }
     
     bool TryParseRowAndValidate(IXLRangeRow row, out RowData rowData, SqlConnection connection, SqlTransaction transaction, Dictionary<string, int> columnNumbers, int counter)
@@ -326,26 +380,27 @@ class DBProcessor
     }
 
 
-    private void InsertRowDataIntoDatabase(RowData rowData, SqlConnection connection, SqlTransaction transaction)
+    private async Task InsertRowDataIntoDatabaseAsync(RowData rowData, SqlConnection connection, SqlTransaction transaction)
     {
-        using (var command = connection.CreateCommand())
+        using (var command = new SqlCommand())
         {
-            command.Transaction = transaction; // Assign the transaction (chatGPT wrote this)
-            var builder = new SqlInsertCommandBuilder(tableName_sql);
-            builder.AddColumnValue(tableName_sql_names, rowData.Name);
-            builder.AddColumnValue(tableName_sql_BirthDate, rowData.BirthDate);
-            builder.AddColumnValue(tableName_sql_PN, rowData.PersonnelNumber);
-            builder.AddColumnValue(tableName_sql_gender, rowData.Gender); //Светлана Котова сказала, что пол не нужен. Можно убрать, если что.
-            builder.AddColumnValue(tableName_sql_jobPosition, rowData.JobPosition);
-            builder.AddColumnValue(tableName_sql_department, rowData.Department);
-            builder.AddColumnValue(tableName_sql_group, rowData.Group);
-            builder.AddColumnValue(tableName_sql_isDriver, rowData.IsDriver);
+            command.Connection = connection;
+            command.Transaction = transaction;
+            command.CommandText = $"INSERT INTO {tableName_sql} (name, jobPosition, isDriver, department, group, birthDate, gender, personnelNumber) VALUES (@name, @jobPosition, @isDriver, @department, @group, @birthDate, @gender, @personnelNumber)";
 
-            builder.ApplyToCommand(command); // This line prepares the command text and parameters (chatGPT wrote this)
-            command.ExecuteNonQuery(); // Execute the command (chatGPT wrote this)
+            command.Parameters.AddWithValue("@name", rowData.Name);
+            command.Parameters.AddWithValue("@jobPosition", rowData.JobPosition);
+            command.Parameters.AddWithValue("@isDriver", rowData.IsDriver);
+            command.Parameters.AddWithValue("@department", rowData.Department);
+            command.Parameters.AddWithValue("@group", rowData.Group);
+            command.Parameters.AddWithValue("@birthDate", rowData.BirthDate);
+            command.Parameters.AddWithValue("@gender", rowData.Gender);
+            command.Parameters.AddWithValue("@personnelNumber", rowData.PersonnelNumber);
+
+            await command.ExecuteNonQueryAsync();
         }
     }
-    
+
 
     public class SqlInsertCommandBuilder
     {
@@ -410,32 +465,6 @@ class DBProcessor
             int result = Convert.ToInt32(command.ExecuteScalar());
             return result == 0; // return true if the value does not exist in the database
         }
-    }
-    public void CreateTable(string tableName)
-    {
-        
-        if (string.IsNullOrWhiteSpace(tableName))
-        {
-            throw new ArgumentException("Table name is null or empty");
-        }
-        // Basic validation to ensure table name is alphanumeric (simple example)
-        //if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-zA-Z0-9]+$"))
-        if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[0-9]+$"))
-        {
-            throw new ArgumentException("Table name must be numeric.");
-        }
-
-        string sql = $"IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName) " +
-                     $"CREATE TABLE [{tableName}] (ID INT PRIMARY KEY,  SampleColumn1 INT);";
-
-        using (SqlConnection conn = new SqlConnection(GetConnectionString()))
-        {
-            SqlCommand cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@tableName", tableName);
-            conn.Open();
-            cmd.ExecuteNonQuery();
-        }
-        Console.WriteLine($"Table {tableName} created successfully!");
     }
 }
 

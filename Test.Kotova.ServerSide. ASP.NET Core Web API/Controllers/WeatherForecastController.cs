@@ -198,13 +198,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         [HttpGet("import-into-db")]
-        public IActionResult ImportIntoDB()
+        public async Task<IActionResult> ImportIntoDBAsync()
         {
             try
             {
-                string excelFilePath = GetNewestExcelFilePath(); 
+                string excelFilePath = GetNewestExcelFilePath();
                 DBProcessor example = new DBProcessor();
-                example.ImportDataFromExcel(example.GetConnectionString(), excelFilePath); 
+                await example.ImportDataFromExcelAsync(example.GetConnectionString(), excelFilePath);
                 return Ok();
             }
             catch (FileNotFoundException ex)
