@@ -214,10 +214,15 @@ class DBProcessor
                     while (reader.Read()) // Read each row returned by the query
                     {
                         var name = reader[tableName_sql_names] as string; // Safely cast to string, which will be null if the value is DBNull
-                        var birthDate = reader[tableName_sql_BirthDate] as string;
-                        if (name != null)
+                        if (reader[tableName_sql_BirthDate] != DBNull.Value)
                         {
-                            names.Add(new Tuple<string, string>(name,birthDate));
+                            DateTime? birthDate = (DateTime?)reader[tableName_sql_BirthDate]; // Correct casting of DateTime
+                            string birthDateString = birthDate.HasValue ? birthDate.Value.ToString("dd-MM-yyyy") : null;
+
+                            if (name != null && birthDateString != null)
+                            {
+                                names.Add(new Tuple<string, string>(name, birthDateString));
+                            }
                         }
                         else
                         {
@@ -473,6 +478,7 @@ class DBProcessor
             return result == 0; // return true if the value does not exist in the database
         }
     }
+
 }
 
 

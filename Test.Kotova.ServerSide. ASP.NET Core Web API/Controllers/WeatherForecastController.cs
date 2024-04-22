@@ -6,7 +6,6 @@ using Path = System.IO.Path;
 using Newtonsoft.Json;
 using Kotova.CommonClasses;
 
-
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
     [ApiController]
@@ -239,43 +238,5 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             return newestFile.FullName;
         }
-
-
-        
     }
 }
-#region Encryption
-public class Encryption_Kotova
-{
-    // Business logic methods here
-    public static string EncryptString(string clearText) // use AES or something! encrypt and transfer over https.
-    {
-        return clearText;
-    }
-    public static List<string> EncryptListOfStrings(List<string> clearList) // use json serealize list of strings into one strings or something.
-    {
-        List<string> encryptedList = new List<string>();
-        foreach (string str in clearList)
-        {
-            encryptedList.Add(EncryptString(str));
-        }
-        return encryptedList;
-    }
-    public static string EncryptDictionary(Dictionary<string, string> dictionary) // use json serealize list of strings into one strings or something.
-    {
-        string serializedDictionary = SerializeDictionaryToJson(dictionary);
-
-        return EncryptString(serializedDictionary);
-    }
-    public static string EncryptListOfTuples(List<Tuple<string,string>> listOfTuples) // use json serealize list of strings into one strings or something.
-    {
-        string serializedDictionary = JsonConvert.SerializeObject(listOfTuples);
-
-        return EncryptString(serializedDictionary);
-    }
-    public static string SerializeDictionaryToJson(Dictionary<string, string> dictionary)
-    {
-        return JsonConvert.SerializeObject(dictionary);
-    }
-}
-#endregion
