@@ -168,8 +168,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 DBProcessor example = new DBProcessor(); // Rename class into something more accurate, if you can.
-                Dictionary<string,string>names = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
-                return Ok(Encryption_Kotova.EncryptDictionary(names));
+                List<Tuple<string, string>> names_and_BirthDate = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
+                return Ok(Encryption_Kotova.EncryptListOfTuples(names_and_BirthDate));
             }
             catch (Exception ex)
             {
@@ -264,6 +264,12 @@ public class Encryption_Kotova
     public static string EncryptDictionary(Dictionary<string, string> dictionary) // use json serealize list of strings into one strings or something.
     {
         string serializedDictionary = SerializeDictionaryToJson(dictionary);
+
+        return EncryptString(serializedDictionary);
+    }
+    public static string EncryptListOfTuples(List<Tuple<string,string>> listOfTuples) // use json serealize list of strings into one strings or something.
+    {
+        string serializedDictionary = JsonConvert.SerializeObject(listOfTuples);
 
         return EncryptString(serializedDictionary);
     }

@@ -198,14 +198,14 @@ class DBProcessor
         // Add other properties as needed...
     }
 
-    public Dictionary<string,string> GetNames(string connectionString)
+    public List<Tuple<string, string>> GetNames(string connectionString)
     {
-        Dictionary<string, string> names = new Dictionary<string, string>(); // Prepare a list to store the retrieved names
+        List<Tuple<string, string>> names = new List<Tuple<string, string>>(); // Prepare a list to store the retrieved names
 
         using (var connection = new SqlConnection(connectionString))
         {
             connection.Open(); // Open the database connection
-            var query = $"SELECT {tableName_sql_names} FROM {tableName_sql}"; // SQL query to retrieve names
+            var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql}"; // SQL query to retrieve names
 
             using (var command = new SqlCommand(query, connection))
             {
@@ -214,10 +214,10 @@ class DBProcessor
                     while (reader.Read()) // Read each row returned by the query
                     {
                         var name = reader[tableName_sql_names] as string; // Safely cast to string, which will be null if the value is DBNull
-                        var personelNumber = reader[tableName_sql_PN] as string;
+                        var birthDate = reader[tableName_sql_BirthDate] as string;
                         if (name != null)
                         {
-                            names.Add(personelNumber, name);
+                            names.Add(new Tuple<string, string>(name,birthDate));
                         }
                         else
                         {
