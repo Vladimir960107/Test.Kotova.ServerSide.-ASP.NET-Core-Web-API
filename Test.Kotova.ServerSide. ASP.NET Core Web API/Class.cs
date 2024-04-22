@@ -153,15 +153,16 @@ class DBProcessor
             throw new ArgumentException("Table name must be numeric.");
         }
 
-        string sql = $"IF EXISTS (SELECT * FROM sys.tables WHERE name = @tableName) " +
-                     $"BEGIN " +
-                     $"  PRINT 'Table {tableName} already exists.'; " +
-                     $"END " +
-                     $"ELSE " +
-                     $"BEGIN " +
-                     $"  CREATE TABLE [{tableName}] (ID INT PRIMARY KEY, SampleColumn1 INT); " +
-                     $"  PRINT 'Table {tableName} created successfully!'; " +
-                     $"END";
+        string sql = $@"
+IF EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
+BEGIN
+  PRINT 'Table {tableName} already exists.';
+END
+ELSE
+BEGIN
+  EXEC('CREATE TABLE [' + '{tableName}' + '] (ID INT PRIMARY KEY, instruction_id INT, is_instruction_passed BIT, datePassed DATETIME);')
+  PRINT 'Table {tableName} created successfully!';
+END";
 
         using (SqlConnection conn = new SqlConnection(GetConnectionString()))
         {
