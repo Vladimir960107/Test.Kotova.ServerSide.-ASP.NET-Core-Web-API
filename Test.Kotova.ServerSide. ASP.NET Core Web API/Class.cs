@@ -386,7 +386,7 @@ class DBProcessor
         {
             command.Connection = connection;
             command.Transaction = transaction;
-            command.CommandText = $"INSERT INTO {tableName_sql} (name, jobPosition, isDriver, department, group, birthDate, gender, personnelNumber) VALUES (@name, @jobPosition, @isDriver, @department, @group, @birthDate, @gender, @personnelNumber)";
+            command.CommandText = $"INSERT INTO {tableName_sql} ({tableName_sql_names}, {tableName_sql_jobPosition}, {tableName_sql_isDriver}, {tableName_sql_department}, [{tableName_sql_group}], {tableName_sql_BirthDate}, {tableName_sql_gender}, {tableName_sql_PN}) VALUES (@name, @jobPosition, @isDriver, @department, @group, @birthDate, @gender, @personnelNumber)";
 
             command.Parameters.AddWithValue("@name", rowData.Name);
             command.Parameters.AddWithValue("@jobPosition", rowData.JobPosition);
