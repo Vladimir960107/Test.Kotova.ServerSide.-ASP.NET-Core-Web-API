@@ -193,6 +193,21 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
         }
+        [HttpPost("send-instruction-and-names")]
+        public IActionResult ReceiveInstructionAndNames([FromBody] InstructionPackage package) //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
+        {
+            try
+            {
+                // Simulate processing the data.
+                return Ok("Received and processed successfully.");
+            }
+            catch (Exception ex)
+            {
+                // Log the exception and return a generic error message.
+                Console.WriteLine(ex.ToString());
+                return BadRequest("An error occurred while processing your request.");
+            }
+        }
 
 
 
