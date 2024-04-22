@@ -168,8 +168,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 DBProcessor example = new DBProcessor(); // Rename class into something more accurate, if you can.
-                List<string>names = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
-                return Ok(Encryption_Kotova.EncryptListOfStrings(names));
+                Dictionary<string,string>names = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
+                return Ok(Encryption_Kotova.EncryptDictionary(names));
             }
             catch (Exception ex)
             {
@@ -260,6 +260,16 @@ public class Encryption_Kotova
             encryptedList.Add(EncryptString(str));
         }
         return encryptedList;
+    }
+    public static string EncryptDictionary(Dictionary<string, string> dictionary) // use json serealize list of strings into one strings or something.
+    {
+        string serializedDictionary = SerializeDictionaryToJson(dictionary);
+
+        return EncryptString(serializedDictionary);
+    }
+    public static string SerializeDictionaryToJson(Dictionary<string, string> dictionary)
+    {
+        return JsonConvert.SerializeObject(dictionary);
     }
 }
 #endregion

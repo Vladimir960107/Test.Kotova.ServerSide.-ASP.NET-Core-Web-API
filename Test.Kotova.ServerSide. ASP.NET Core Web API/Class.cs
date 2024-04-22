@@ -44,6 +44,10 @@ class DBProcessor
     private const string connectionString_server = "localhost";
     private const string connectionString_database = "TestDB";
 
+    private const string tableName_sql_USER_instruction_id = "instruction_id";
+    private const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
+    private const string tableName_sql_USER_datePassed = "date_when_passed";
+
 
     public string GetConnectionString()
     {
@@ -153,16 +157,17 @@ class DBProcessor
             throw new ArgumentException("Table name must be numeric.");
         }
 
-        string sql = $@"
-IF EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
-BEGIN
-  PRINT 'Table {tableName} already exists.';
-END
-ELSE
-BEGIN
-  EXEC('CREATE TABLE [' + '{tableName}' + '] (ID INT PRIMARY KEY, instruction_id INT, is_instruction_passed BIT, datePassed DATETIME);')
-  PRINT 'Table {tableName} created successfully!';
-END";
+        string sql = $@"IF EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
+            BEGIN
+              PRINT 'Table {tableName} already exists.';
+            END
+            ELSE
+            BEGIN
+              EXEC('CREATE TABLE [' + '{tableName}' + '] (ID INT PRIMARY KEY, {tableName_sql_USER_instruction_id} INT,
+            {tableName_sql_USER_is_instruction_passed} BIT, 
+            {tableName_sql_USER_datePassed} DATETIME);')
+              PRINT 'Table {tableName} created successfully!';
+            END";
 
         using (SqlConnection conn = new SqlConnection(GetConnectionString()))
         {
@@ -193,9 +198,9 @@ END";
         // Add other properties as needed...
     }
 
-    public List<string> GetNames(string connectionString)
+    public Dictionary<string,string> GetNames(string connectionString)
     {
-        var names = new List<string>(); // Prepare a list to store the retrieved names
+        Dictionary<string, string> names = new Dictionary<string, string>(); // Prepare a list to store the retrieved names
 
         using (var connection = new SqlConnection(connectionString))
         {
@@ -209,9 +214,10 @@ END";
                     while (reader.Read()) // Read each row returned by the query
                     {
                         var name = reader[tableName_sql_names] as string; // Safely cast to string, which will be null if the value is DBNull
+                        var personelNumber = reader[tableName_sql_PN] as string;
                         if (name != null)
                         {
-                            names.Add(name);
+                            names.Add(personelNumber, name);
                         }
                         else
                         {
