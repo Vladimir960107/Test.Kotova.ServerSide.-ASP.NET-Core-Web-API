@@ -37,10 +37,8 @@ class DBProcessor
     private const string tableName_sql_department = "department";
     private const string tableName_sql_group = "group";
 
-    private const string tableName_sql_instructions_names = "name_of_instruction";
-
     private const string tableName_sql = "dbo.TableTest";
-    private const string tableName_Notifications_sql = "dbo.Notifications";
+    private const string tableName_Instructions_sql = "dbo.Instructions";
     private const string connectionString_server = "localhost";
     private const string connectionString_database = "TestDB";
 
@@ -238,24 +236,25 @@ class DBProcessor
     }
     public List<Notification> GetInstructions(string connectionString) //This function is similar to GetNames
     {
-        var instructions = new List<Notification>(); 
+        var instructions = new List<Notification>();
         using (var connection = new SqlConnection(connectionString))
         {
-            connection.Open(); 
-            var query = $"SELECT {tableName_sql_instructions_names} FROM {tableName_Notifications_sql}"; 
+            connection.Open();
+            var query = $"SELECT {tableName_sql_INSTRUCTIONS_cause} FROM {tableName_Instructions_sql}";
 
             using (var command = new SqlCommand(query, connection))
             {
                 using (var reader = command.ExecuteReader())
                 {
-                    while (reader.Read()) 
+                    while (reader.Read())
                     {
-                        var name = reader[tableName_sql_instructions_names] as string; 
+
+                        var name = reader[tableName_sql_INSTRUCTIONS_cause] as string;
                         if (name != null)
                         {
                             Notification notification = new Notification(name);
                             instructions.Add(notification);
-                            
+
                         }
                         else
                         {
@@ -266,9 +265,9 @@ class DBProcessor
             }
         }
 
-        return instructions; 
+        return instructions;
     }
-    
+
     bool TryParseRowAndValidate(IXLRangeRow row, out RowData rowData, SqlConnection connection, SqlTransaction transaction, Dictionary<string, int> columnNumbers, int counter)
     {
         try
@@ -479,42 +478,99 @@ class DBProcessor
             return result == 0; // return true if the value does not exist in the database
         }
     }
-    public async Task<int?> FindNotificationId(string? instructionCause, string connectionString)
+    
+    public async Task<bool> ProcessDataAsync(InstructionPackage package) //Тут происоходит какой-то пиздец(в плане нагроможденности, стоит ли переносить всё в static?), перепиши это, для надёжности, или пойми как это рабоает.
     {
-        using (var connection = new SqlConnection(connectionString))
+        try
         {
-            await connection.OpenAsync();
-            using (SqlTransaction transaction = connection.BeginTransaction())
+            using (var connection = new SqlConnection(GetConnectionString()))
             {
-                try
+                await connection.OpenAsync();
+                using (var transaction = connection.BeginTransaction())
                 {
-                    SqlCommand command = new SqlCommand($"SELECT {tableName_sql_USER_instruction_id} FROM Instructions WHERE {tableName_sql_INSTRUCTIONS_cause} = @name", connection, transaction);
-                    command.Parameters.AddWithValue("@name", instructionCause);
-
-                    // Execute the command asynchronously and read the result
-                    using (var reader = await command.ExecuteReaderAsync())
+                    try
                     {
-                        if (await reader.ReadAsync())
+                        var instructionId = await FindInstructionIdAsync(package.InstructionCause, connection, transaction);
+
+                        if (instructionId == null)
                         {
-                            int id = reader.GetInt32(0); // Get the first column value as integer
-                            transaction.Commit();
-                            return id;
+                            Console.WriteLine("Couldn't find notification Id by its name");
+                            transaction.Rollback();
+                            return false;
                         }
-                        else
-                        {
-                            return null; // No result found
-                        }
+
+                        Console.WriteLine(instructionId.ToString());
+                        transaction.Commit();
+                        return true;
                     }
-                }
-                catch
-                {
-                    transaction.Rollback();
-                    throw;
+                    catch
+                    {
+                        transaction.Rollback();
+                        throw;
+                    }
                 }
             }
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.ToString());
+            return false;
+        }
+        /*
+        try
+        {
+            using (var connection = new SqlConnection(GetConnectionString()))
+            {
+                await connection.OpenAsync();
+                using (var transaction = connection.BeginTransaction())
+                {
+                    try
+                    {
+                        //List<string> personelNumbers = await FindPNsOfNames(package.Names);
+                        //Tuple<int?, string> notificationIdAndName = Tuple.Create(await example.FindInstructionIdAsync(package.InstructionCause,example.GetConnectionString() ),package.InstructionCause);
+                        // Simulating an async operation, like saving to a database
+                        if (notificationIdAndName.Item1 == null)
+                        {
+                            Console.WriteLine("Couldn't find notification Id by its name");
+                            return false;
+                        }
+                        Console.WriteLine(notificationIdAndName.Item1.ToString());
+                        //await SendNotificationToPeopleAsync(personelNumbers, notificationIdAndName);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(ex.ToString());
+
+                        // Return false or throw an exception, depending on how you want to handle errors
+                        return false;
+                    }
+                }
+
+            }
+        }
+        */
     }
 
+    public async Task<int?> FindInstructionIdAsync(string? instructionCause, SqlConnection connection, SqlTransaction transaction)
+    {
+        int? instructionId = null;
+        string query = $"SELECT {tableName_sql_USER_instruction_id} FROM {tableName_Instructions_sql} WHERE {tableName_sql_INSTRUCTIONS_cause} = @Cause";
+        using (SqlCommand command = new SqlCommand(query, connection, transaction))
+        {
+            command.Parameters.AddWithValue("@Cause", instructionCause);
+
+            using (SqlDataReader reader = await command.ExecuteReaderAsync())
+            {
+                if (await reader.ReadAsync())
+                {
+                    instructionId = reader.GetInt32(0);
+                }
+                reader.Close(); // Explicitly close the reader if not using 'using' statement
+            }
+        }
+        return instructionId;
+    }
 }
 
 
