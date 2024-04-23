@@ -5,6 +5,8 @@ using Microsoft.OpenApi.Models;
 using Path = System.IO.Path;
 using Newtonsoft.Json;
 using Kotova.CommonClasses;
+using Newtonsoft.Json.Linq;
+using System.Text;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -194,22 +196,88 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
         [HttpPost("send-instruction-and-names")]
-        public IActionResult ReceiveInstructionAndNames([FromBody] InstructionPackage package) //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
+        public async Task<IActionResult> ReceiveInstructionAndNames([FromBody] InstructionPackage package) //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
+        //public async Task<IActionResult> ReceiveInstructionAndNamesAsync([FromBody] string encryptedData)
         {
+
+            //if (string.IsNullOrEmpty(encryptedData))
+            if (package == null)
+            {
+                return BadRequest("Empty or null encrypted payload is not acceptable.");
+            }
             try
             {
-                // Simulate processing the data.
-                return Ok("Received and processed successfully.");
+                // Decrypt data here
+                //string jsonData = await DecryptAsync(encryptedData);
+                //InstructionPackage package = System.Text.Json.JsonSerializer.Deserialize<InstructionPackage>(jsonData);
+
+                if (!ModelState.IsValid)
+                {
+                    // Return a 400 BadRequest with detailed information about what validation rules were violated
+                    return BadRequest(ModelState);
+                }
+
+                // Here you would include any logic to process the package, e.g., storing it in a database asynchronously
+                bool result = await ProcessDataAsync(package);
+                if (result)
+                {
+                    return Ok($"Received and processed successfully: {package.InstructionCause} with {package.Names.Count} names.");
+                }
+                else
+                {
+                    return BadRequest("Oops, something went wrong in ProcessDataAsync :(");
+                }
             }
             catch (Exception ex)
             {
-                // Log the exception and return a generic error message.
+                // If an error occurs, log it and return a BadRequest with the error message
                 Console.WriteLine(ex.ToString());
-                return BadRequest("An error occurred while processing your request.");
+                return BadRequest($"An error occurred while processing the instruction and names: {ex.Message}");
             }
         }
 
+        private async Task<string> DecryptAsync(string encryptedData)
+        {
+            // Placeholder for decryption logic
+            // Replace this with your actual decryption method which might involve asynchronous operations
+            await Task.Delay(10); // Simulating an async operation
+                                  // For demonstration, just assume it returns the string directly
+            return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedData));
+        }
 
+        private async Task<bool> ProcessDataAsync(InstructionPackage package)
+        {
+            try
+            {
+                DBProcessor example = new DBProcessor();
+                List<string> personelNumbers = await FindPNsOfNames(package.Names);
+                Tuple<int?, string> notificationIdAndName = Tuple.Create(await example.FindNotificationId(package.InstructionCause,example.GetConnectionString() ),package.InstructionCause);
+                // Simulating an async operation, like saving to a database
+                if (notificationIdAndName.Item1 == null)
+                {
+                    Console.WriteLine("Couldn't find notification Id by its name");
+                    return false;
+                }
+                await SendNotificationToPeopleAsync(personelNumbers, notificationIdAndName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+
+                // Return false or throw an exception, depending on how you want to handle errors
+                return false;
+            }
+        }
+
+        private async Task<List<string>> FindPNsOfNames(List<string>? names)
+        {
+            throw new NotImplementedException();
+        }
+        private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, Tuple<int?, string> notificationIdAndName)
+        {
+            throw new NotImplementedException();
+        }
 
         [HttpGet("import-into-db")]
         public async Task<IActionResult> ImportIntoDBAsync()

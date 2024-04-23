@@ -47,6 +47,7 @@ class DBProcessor
     private const string tableName_sql_USER_instruction_id = "instruction_id";
     private const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
     private const string tableName_sql_USER_datePassed = "date_when_passed";
+    private const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
 
 
     public string GetConnectionString()
@@ -476,6 +477,41 @@ class DBProcessor
             command.Parameters.AddWithValue("@numberToCheck", valueToCheck);
             int result = Convert.ToInt32(command.ExecuteScalar());
             return result == 0; // return true if the value does not exist in the database
+        }
+    }
+    public async Task<int?> FindNotificationId(string? instructionCause, string connectionString)
+    {
+        using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using (SqlTransaction transaction = connection.BeginTransaction())
+            {
+                try
+                {
+                    SqlCommand command = new SqlCommand($"SELECT {tableName_sql_USER_instruction_id} FROM Instructions WHERE {tableName_sql_INSTRUCTIONS_cause} = @name", connection, transaction);
+                    command.Parameters.AddWithValue("@name", instructionCause);
+
+                    // Execute the command asynchronously and read the result
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            int id = reader.GetInt32(0); // Get the first column value as integer
+                            transaction.Commit();
+                            return id;
+                        }
+                        else
+                        {
+                            return null; // No result found
+                        }
+                    }
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
         }
     }
 
