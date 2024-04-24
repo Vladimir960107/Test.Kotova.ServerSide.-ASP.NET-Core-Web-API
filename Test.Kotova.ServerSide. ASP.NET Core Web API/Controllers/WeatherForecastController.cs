@@ -221,7 +221,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 bool result = await example.ProcessDataAsync(package);
                 if (result)
                 {
-                    return Ok($"Received and processed successfully: {package.InstructionCause} with {package.Names.Count} names.");
+                    return Ok($"Received and processed successfully: {package.InstructionCause} instructions with {package.NamesAndBirthDates.Count} names.");
                 }
                 else
                 {
@@ -243,17 +243,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             await Task.Delay(10); // Simulating an async operation
                                   // For demonstration, just assume it returns the string directly
             return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedData));
-        }
-
-        
-
-        private async Task<List<string>> FindPNsOfNames(List<string>? names)
-        {
-            throw new NotImplementedException();
-        }
-        private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, Tuple<int?, string> notificationIdAndName)
-        {
-            throw new NotImplementedException();
         }
 
         [HttpGet("import-into-db")]

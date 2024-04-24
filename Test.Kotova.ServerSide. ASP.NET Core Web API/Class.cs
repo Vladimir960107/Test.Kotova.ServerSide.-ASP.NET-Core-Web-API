@@ -20,6 +20,8 @@ using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Presentation;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
+using DocumentFormat.OpenXml.Wordprocessing;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -47,6 +49,7 @@ class DBProcessor
     private const string tableName_sql_USER_datePassed = "date_when_passed";
     private const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
 
+    private const string birthDate_format = "dd-MM-yyyy";
 
     public string GetConnectionString()
     {
@@ -216,7 +219,7 @@ class DBProcessor
                         if (reader[tableName_sql_BirthDate] != DBNull.Value)
                         {
                             DateTime? birthDate = (DateTime?)reader[tableName_sql_BirthDate]; // Correct casting of DateTime
-                            string birthDateString = birthDate.HasValue ? birthDate.Value.ToString("dd-MM-yyyy") : null;
+                            string birthDateString = birthDate.HasValue ? birthDate.Value.ToString(birthDate_format) : null;
 
                             if (name != null && birthDateString != null)
                             {
@@ -491,13 +494,14 @@ class DBProcessor
                     try
                     {
                         var instructionId = await FindInstructionIdAsync(package.InstructionCause, connection, transaction);
-
                         if (instructionId == null)
                         {
                             Console.WriteLine("Couldn't find notification Id by its name");
                             transaction.Rollback();
                             return false;
                         }
+
+                        List<string> personelNumbers = await FindPNsOfNames(package.NamesAndBirthDates, connection, transaction);
 
                         Console.WriteLine(instructionId.ToString());
                         transaction.Commit();
@@ -570,6 +574,45 @@ class DBProcessor
             }
         }
         return instructionId;
+    }
+
+    private async Task<List<string>> FindPNsOfNames(List<Tuple<string, string>>? namesAndBirthDatesString, SqlConnection connection, SqlTransaction transaction)
+    {
+        if (namesAndBirthDatesString is null ||!namesAndBirthDatesString.Any() ) { throw new ArgumentException("namesAndBirthDatesString is empty!"); }
+        List<Tuple<string,DateTime>> namesAndBirthDates = new List<Tuple<string,DateTime>>();
+        namesAndBirthDates.Add
+        (List<string> names, List<DateTime> birthDates) = 
+        string query = $"SELECT {tableName_sql_PN} FROM {tableName_sql} WHERE {tableName_sql_names} = @name AND {tableName_sql_BirthDate} = @birthDate";
+        using (SqlCommand command = new SqlCommand(query, connection, transaction))
+        {
+            command.Parameters.AddWithValue("@name", name);
+            command.Parameters.AddWithValue("@birthDate", birthDate);
+
+            using (SqlDataReader reader = await command.ExecuteReaderAsync())
+            {
+                if (await reader.ReadAsync())
+                {
+                    instructionId = reader.GetInt32(0);
+                }
+                reader.Close(); // Explicitly close the reader if not using 'using' statement
+            }
+        }
+        return instructionId;
+    }
+
+    private (List<string>, List<DateTime>) DeconstructNamesAndBirthDates(List<Tuple<string, string>> namesAndBirthDates)
+    {
+        List<string> names = new List<string>();
+        List <DateTime> birthDates = new List<DateTime>();
+        foreach (string nameAndBirthDate in namesAndBirthDates)
+        {
+            
+        }
+    }
+
+    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, Tuple<int?, string> notificationIdAndName)
+    {
+        throw new NotImplementedException();
     }
 }
 
