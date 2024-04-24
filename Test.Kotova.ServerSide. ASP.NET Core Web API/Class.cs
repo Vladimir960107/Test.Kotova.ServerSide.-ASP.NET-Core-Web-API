@@ -22,6 +22,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Net;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -496,14 +497,29 @@ class DBProcessor
                         var instructionId = await FindInstructionIdAsync(package.InstructionCause, connection, transaction);
                         if (instructionId == null)
                         {
-                            Console.WriteLine("Couldn't find notification Id by its name");
+                            Console.WriteLine("Couldn't find instruction Id by its name");
+                            transaction.Rollback();
+                            return false;
+                            
+                        }
+                        int instructionId_NonNull = instructionId ?? default(int);
+
+                        List<string> personelNumbers = await FindPNsOfNames(package.NamesAndBirthDates, connection, transaction);
+                        if (personelNumbers.Count == 0)
+                        {
+                            Console.WriteLine("Couldn't find personelNumbers by full names");
+                            transaction.Rollback();
+                            return false;
+                        }
+                        var isEverythingFine = await SendNotificationToPeopleAsync(personelNumbers, instructionId_NonNull, connection, transaction);
+
+                        if (!isEverythingFine) 
+                        {
+                            Console.WriteLine("Couldn't add instruction to names");
                             transaction.Rollback();
                             return false;
                         }
 
-                        List<string> personelNumbers = await FindPNsOfNames(package.NamesAndBirthDates, connection, transaction);
-
-                        Console.WriteLine(instructionId.ToString());
                         transaction.Commit();
                         return true;
                     }
@@ -579,40 +595,82 @@ class DBProcessor
     private async Task<List<string>> FindPNsOfNames(List<Tuple<string, string>>? namesAndBirthDatesString, SqlConnection connection, SqlTransaction transaction)
     {
         if (namesAndBirthDatesString is null ||!namesAndBirthDatesString.Any() ) { throw new ArgumentException("namesAndBirthDatesString is empty!"); }
-        List<Tuple<string,DateTime>> namesAndBirthDates = new List<Tuple<string,DateTime>>();
-        namesAndBirthDates.Add
-        (List<string> names, List<DateTime> birthDates) = 
+        (List<string> names, List<DateTime> birthDates) = DeconstructNamesAndBirthDates(namesAndBirthDatesString);
         string query = $"SELECT {tableName_sql_PN} FROM {tableName_sql} WHERE {tableName_sql_names} = @name AND {tableName_sql_BirthDate} = @birthDate";
-        using (SqlCommand command = new SqlCommand(query, connection, transaction))
-        {
-            command.Parameters.AddWithValue("@name", name);
-            command.Parameters.AddWithValue("@birthDate", birthDate);
+       
+        List<string> PersonalNumbers = new List<string>();
 
-            using (SqlDataReader reader = await command.ExecuteReaderAsync())
+        for (int i = 0; i < names.Count; i++)
+        {
+            string name = names[i];
+            DateTime birthDate = birthDates[i];
+
+            using (SqlCommand command = new SqlCommand(query, connection, transaction))
             {
-                if (await reader.ReadAsync())
+                command.Parameters.AddWithValue("@name", name);
+                command.Parameters.AddWithValue("@birthDate", birthDate);
+
+                using (SqlDataReader reader = await command.ExecuteReaderAsync())
                 {
-                    instructionId = reader.GetInt32(0);
+                    while (await reader.ReadAsync())
+                    {
+                        PersonalNumbers.Add(reader.GetString(0)); // Assuming PN is a string
+                    }
+                    reader.Close(); // It's safe to explicitly close here
                 }
-                reader.Close(); // Explicitly close the reader if not using 'using' statement
             }
         }
-        return instructionId;
+        return PersonalNumbers;
     }
 
-    private (List<string>, List<DateTime>) DeconstructNamesAndBirthDates(List<Tuple<string, string>> namesAndBirthDates)
+    private (List<string>, List<DateTime>) DeconstructNamesAndBirthDates(List<Tuple<string, string>> namesAndBirthDatesString)
     {
         List<string> names = new List<string>();
         List <DateTime> birthDates = new List<DateTime>();
-        foreach (string nameAndBirthDate in namesAndBirthDates)
+        foreach (var item in namesAndBirthDatesString)
         {
-            
+            try
+            {
+                // Parse the date from the string
+                DateTime date = DateTime.ParseExact(item.Item2, birthDate_format, CultureInfo.InvariantCulture);
+
+                names.Add(item.Item1);
+                birthDates.Add(date);
+            }
+            catch (FormatException ex)
+            {
+                Console.WriteLine($"Invalid date format for: {item.Item1} with date {item.Item2}");
+                Console.WriteLine(ex.Message);
+                throw;
+            }
         }
+        return (names, birthDates);
     }
 
-    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, Tuple<int?, string> notificationIdAndName)
+    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int notificationId, SqlConnection connection, SqlTransaction transaction)
     {
-        throw new NotImplementedException();
+        try
+        {
+            foreach (string personelNumber in personelNumbers)
+            {
+                //Console.WriteLine(personelNumber);
+                string tableName = "["+ connectionString_database + ".dbo." + personelNumber+"]";
+                string query = $"UPDATE {tableName} SET {tableName_sql_USER_instruction_id} = @instructionId";
+
+                using (SqlCommand command = new SqlCommand(query, connection, transaction))
+                {
+                    command.Parameters.AddWithValue("@instructionId", notificationId);
+                    await command.ExecuteNonQueryAsync();
+                }
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Log error and rollback transaction if something goes wrong
+            Console.WriteLine($"An error occurred: {ex.Message}");
+            return false;
+        }
     }
 }
 
