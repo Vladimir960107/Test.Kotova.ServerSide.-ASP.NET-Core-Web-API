@@ -23,6 +23,7 @@ using System.Text.RegularExpressions;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System.Net;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -40,7 +41,7 @@ class DBProcessor
     private const string tableName_sql_department = "department";
     private const string tableName_sql_group = "group";
 
-    private const string tableName_sql = "dbo.TableTest";
+    private const string tableName_sql_MainName = "dbo.TableTest";
     private const string tableName_Instructions_sql = "dbo.Instructions";
     private const string connectionString_server = "localhost";
     private const string connectionString_database = "TestDB";
@@ -166,7 +167,7 @@ class DBProcessor
             END
             ELSE
             BEGIN
-              EXEC('CREATE TABLE [' + '{tableName}' + '] (ID INT PRIMARY KEY, {tableName_sql_USER_instruction_id} INT,
+              EXEC('CREATE TABLE [' + '{tableName}' + '] (ID int IDENTITY(1,1) PRIMARY KEY, {tableName_sql_USER_instruction_id} INT,
             {tableName_sql_USER_is_instruction_passed} BIT, 
             {tableName_sql_USER_datePassed} DATETIME);')
               PRINT 'Table {tableName} created successfully!';
@@ -208,7 +209,7 @@ class DBProcessor
         using (var connection = new SqlConnection(connectionString))
         {
             connection.Open(); // Open the database connection
-            var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql}"; // SQL query to retrieve names
+            var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql_MainName}"; // SQL query to retrieve names
 
             using (var command = new SqlCommand(query, connection))
             {
@@ -377,7 +378,7 @@ class DBProcessor
             throw new ArgumentException("personnelNumber is too big");
         }
         string personnelNumber_10ZeroesString = PadNumberWith10Zeroes(personnelNumber);
-        if (!CheckIfAlreadyExistsInDB(connection, transaction, tableName_sql, tableName_sql_PN, personnelNumber_10ZeroesString))
+        if (!CheckIfAlreadyExistsInDB(connection, transaction, tableName_sql_MainName, tableName_sql_PN, personnelNumber_10ZeroesString))
         {
             throw new ArgumentException($"personnelNumber {personnelNumber_10ZeroesString} already exist in DB");
         }
@@ -402,7 +403,7 @@ class DBProcessor
         {
             command.Connection = connection;
             command.Transaction = transaction;
-            command.CommandText = $"INSERT INTO {tableName_sql} ({tableName_sql_names}, {tableName_sql_jobPosition}, {tableName_sql_isDriver}, {tableName_sql_department}, [{tableName_sql_group}], {tableName_sql_BirthDate}, {tableName_sql_gender}, {tableName_sql_PN}) VALUES (@name, @jobPosition, @isDriver, @department, @group, @birthDate, @gender, @personnelNumber)";
+            command.CommandText = $"INSERT INTO {tableName_sql_MainName} ({tableName_sql_names}, {tableName_sql_jobPosition}, {tableName_sql_isDriver}, {tableName_sql_department}, [{tableName_sql_group}], {tableName_sql_BirthDate}, {tableName_sql_gender}, {tableName_sql_PN}) VALUES (@name, @jobPosition, @isDriver, @department, @group, @birthDate, @gender, @personnelNumber)";
 
             command.Parameters.AddWithValue("@name", rowData.Name);
             command.Parameters.AddWithValue("@jobPosition", rowData.JobPosition);
@@ -596,7 +597,7 @@ class DBProcessor
     {
         if (namesAndBirthDatesString is null ||!namesAndBirthDatesString.Any() ) { throw new ArgumentException("namesAndBirthDatesString is empty!"); }
         (List<string> names, List<DateTime> birthDates) = DeconstructNamesAndBirthDates(namesAndBirthDatesString);
-        string query = $"SELECT {tableName_sql_PN} FROM {tableName_sql} WHERE {tableName_sql_names} = @name AND {tableName_sql_BirthDate} = @birthDate";
+        string query = $"SELECT {tableName_sql_PN} FROM {tableName_sql_MainName} WHERE {tableName_sql_names} = @name AND {tableName_sql_BirthDate} = @birthDate";
        
         List<string> PersonalNumbers = new List<string>();
 
@@ -647,19 +648,26 @@ class DBProcessor
         return (names, birthDates);
     }
 
-    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int notificationId, SqlConnection connection, SqlTransaction transaction)
+    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int instructionId, SqlConnection connection, SqlTransaction transaction)
     {
         try
         {
             foreach (string personelNumber in personelNumbers)
             {
+                string tableName = $"[dbo].[{personelNumber}]";
                 //Console.WriteLine(personelNumber);
-                string tableName = "["+ connectionString_database + ".dbo." + personelNumber+"]";
-                string query = $"UPDATE {tableName} SET {tableName_sql_USER_instruction_id} = @instructionId";
+                //string tableName = "["+ connectionString_database + ".dbo." + personelNumber+"]";
+                string query = $"INSERT INTO {tableName} ({tableName_sql_USER_instruction_id}, {tableName_sql_USER_is_instruction_passed}) VALUES(@instructionId, @falseValue)";
+
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await connection.OpenAsync();
+                }
 
                 using (SqlCommand command = new SqlCommand(query, connection, transaction))
                 {
-                    command.Parameters.AddWithValue("@instructionId", notificationId);
+                    command.Parameters.AddWithValue("@instructionId", instructionId);
+                    command.Parameters.AddWithValue("@falseValue", false);
                     await command.ExecuteNonQueryAsync();
                 }
             }
