@@ -50,8 +50,10 @@ class DBProcessor
     private const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
     private const string tableName_sql_USER_datePassed = "date_when_passed";
     private const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
+    private const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
+    private const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
 
-    private const string birthDate_format = "dd-MM-yyyy";
+    private const string birthDate_format = "yyyy-MM-dd";
 
     public string GetConnectionString()
     {
@@ -169,7 +171,9 @@ class DBProcessor
             BEGIN
               EXEC('CREATE TABLE [' + '{tableName}' + '] (ID int IDENTITY(1,1) PRIMARY KEY, {tableName_sql_USER_instruction_id} INT,
             {tableName_sql_USER_is_instruction_passed} BIT, 
-            {tableName_sql_USER_datePassed} DATETIME);')
+            {tableName_sql_USER_datePassed} DATETIME,
+            {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
+            {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME);')
               PRINT 'Table {tableName} created successfully!';
             END";
 
@@ -184,6 +188,7 @@ class DBProcessor
                 {
                     Console.WriteLine(reader[0].ToString());
                 }
+                reader.Close();
             }
         }
     }
@@ -232,7 +237,9 @@ class DBProcessor
                         {
                             // Optionally handle or log null values here
                         }
+
                     }
+                    reader.Close();
                 }
             }
         }
@@ -266,6 +273,7 @@ class DBProcessor
                             // Optionally handle or log null values here
                         }
                     }
+                    reader.Close();
                 }
             }
         }
@@ -471,9 +479,9 @@ class DBProcessor
         return number.ToString("D10");
     }
 
-    private bool CheckIfAlreadyExistsInDB(SqlConnection connection, SqlTransaction transaction, string tableName, string columnName, object valueToCheck)
+    private bool CheckIfAlreadyExistsInDB(SqlConnection connection, SqlTransaction transaction, string tableName, string columnName, object valueToCheck) //just to check whether the index already exist in the database (method)
     {
-        //just to check whether the index already exist in the database (method)
+        
         string query = $"SELECT COUNT(*) FROM {tableName} WHERE [{columnName}] = @numberToCheck";
 
         using (SqlCommand command = new SqlCommand(query, connection, transaction))
@@ -484,7 +492,7 @@ class DBProcessor
         }
     }
     
-    public async Task<bool> ProcessDataAsync(InstructionPackage package) //Тут происоходит какой-то пиздец(в плане нагроможденности, стоит ли переносить всё в static?), перепиши это, для надёжности, или пойми как это рабоает.
+    public async Task<bool> ProcessDataAsync(InstructionPackage package) 
     {
         try
         {
@@ -537,40 +545,6 @@ class DBProcessor
             Console.WriteLine(ex.ToString());
             return false;
         }
-        /*
-        try
-        {
-            using (var connection = new SqlConnection(GetConnectionString()))
-            {
-                await connection.OpenAsync();
-                using (var transaction = connection.BeginTransaction())
-                {
-                    try
-                    {
-                        //List<string> personelNumbers = await FindPNsOfNames(package.Names);
-                        //Tuple<int?, string> notificationIdAndName = Tuple.Create(await example.FindInstructionIdAsync(package.InstructionCause,example.GetConnectionString() ),package.InstructionCause);
-                        // Simulating an async operation, like saving to a database
-                        if (notificationIdAndName.Item1 == null)
-                        {
-                            Console.WriteLine("Couldn't find notification Id by its name");
-                            return false;
-                        }
-                        Console.WriteLine(notificationIdAndName.Item1.ToString());
-                        //await SendNotificationToPeopleAsync(personelNumbers, notificationIdAndName);
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine(ex.ToString());
-
-                        // Return false or throw an exception, depending on how you want to handle errors
-                        return false;
-                    }
-                }
-
-            }
-        }
-        */
     }
 
     public async Task<int?> FindInstructionIdAsync(string? instructionCause, SqlConnection connection, SqlTransaction transaction)
@@ -656,8 +630,9 @@ class DBProcessor
             {
                 string tableName = $"[dbo].[{personelNumber}]";
                 //Console.WriteLine(personelNumber);
-                //string tableName = "["+ connectionString_database + ".dbo." + personelNumber+"]";
-                string query = $"INSERT INTO {tableName} ({tableName_sql_USER_instruction_id}, {tableName_sql_USER_is_instruction_passed}) VALUES(@instructionId, @falseValue)";
+                string query = $"INSERT INTO {tableName} ({tableName_sql_USER_instruction_id}, {tableName_sql_USER_is_instruction_passed}, " +
+                    $"{tableName_sql_USER_whenWasSendByHeadOfDepartment}, {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime})" +
+                    $" VALUES(@instructionId, @falseValue,@whenWasSendToUser, @whenWasSendToUserUTC)";
 
                 if (connection.State != System.Data.ConnectionState.Open)
                 {
@@ -668,6 +643,8 @@ class DBProcessor
                 {
                     command.Parameters.AddWithValue("@instructionId", instructionId);
                     command.Parameters.AddWithValue("@falseValue", false);
+                    command.Parameters.AddWithValue("@whenWasSendToUser", DateTime.Now);
+                    command.Parameters.AddWithValue("@whenWasSendToUserUTC", DateTime.UtcNow);
                     await command.ExecuteNonQueryAsync();
                 }
             }
