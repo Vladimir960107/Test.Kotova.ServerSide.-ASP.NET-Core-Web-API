@@ -1,8 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.Extensions.Configuration;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+
+
 
 // Add services to the container.
 
@@ -11,12 +19,30 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-//builder.Services.AddDbContext<ApplicationDbContext>(options =>
-//  options.UseSqlServer(configuration.GetConnectionString("DefaultConnection"))); //–¿— ŒÃ≈Õ“»–Œ¬¿“‹ ›“» 2 —“–Œ◊ » » ƒŒœ»—¿“‹.
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
+
+builder.Services.AddAuthentication("CookieAuth")
+    .AddCookie("CookieAuth", options =>
+    {
+        options.Cookie.HttpOnly = true;
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(60);
+        options.LoginPath = "/login"; // Custom login path if needed
+        options.LogoutPath = "/logout"; // Custom logout path if needed
+        options.SlidingExpiration = true;
+    });
+
+
+
+
+builder.Services.AddScoped<LegacyAuthenticationService>();//Try to understand what you have done here :)
+
+//builder.Services.AddTransient<IEmailService, EmailService>(); //for 2-factor authentication
+
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -28,5 +54,5 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
-
 app.Run();
+

@@ -7,6 +7,8 @@ using Newtonsoft.Json;
 using Kotova.CommonClasses;
 using Newtonsoft.Json.Linq;
 using System.Text;
+using System.Security.Claims;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -286,6 +288,39 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             return newestFile.FullName;
+        }
+    }
+    public class AuthenticationController : ControllerBase
+    {
+        private readonly LegacyAuthenticationService _legacyAuthService;
+
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService)
+        {
+            _legacyAuthService = legacyAuthService;
+        }
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] User model)
+        {
+            var user = await _legacyAuthService.PerformLogin(model.username, model.username);
+            /*
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim(ClaimTypes.Role, user.Role),
+            }
+            */
+            if (user is not false)
+            {
+                // Handle successful authentication, e.g., issue a token or set a cookie
+                return Ok("User authenticated successfully.");
+            }
+            else
+            {
+                // Handle failed authentication
+                return Unauthorized("Authentication failed.");
+            }
         }
     }
 }

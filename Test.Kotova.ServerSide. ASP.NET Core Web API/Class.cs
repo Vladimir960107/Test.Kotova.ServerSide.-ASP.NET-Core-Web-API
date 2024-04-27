@@ -24,6 +24,7 @@ using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System.Net;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.EntityFrameworkCore;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -59,16 +60,6 @@ class DBProcessor
     {
         // Use Windows Authentication for simplicity and security
         return $"Server={connectionString_server};Database={connectionString_database};Integrated Security=True;";
-    }
-
-    private string GetExcelFilePath()
-    {
-        string[] excelFilePaths = { @"C:\", "Users", "hifly", "Desktop", "Котова", "TEST Для базы данных.xlsx" };
-        return Path.Combine(excelFilePaths);
-    }
-    public string GetTableName()
-    {
-        return "dbo.TableTest";
     }
 
     public async Task ImportDataFromExcelAsync(string connectionString, string excelFilePath)
