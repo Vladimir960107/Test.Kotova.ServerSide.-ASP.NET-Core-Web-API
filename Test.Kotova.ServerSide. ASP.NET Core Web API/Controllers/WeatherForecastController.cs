@@ -9,6 +9,7 @@ using Newtonsoft.Json.Linq;
 using System.Text;
 using System.Security.Claims;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
+using System.Text.RegularExpressions;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -300,9 +301,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] User model)
+        public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
-            var user = await _legacyAuthService.PerformLogin(model.username, model.username);
+            Console.WriteLine(model.username);
+            string? personnelNumber = await _legacyAuthService.PerformLogin(model.username, model.password);
             /*
             var claims = new List<Claim>
             {
@@ -311,16 +313,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 new Claim(ClaimTypes.Role, user.Role),
             }
             */
-            if (user is not false)
+            if (personnelNumber is not null)
             {
+                if (CheckForValidPersonnelNumber(personnelNumber))
+                {
+                    return Ok($"User authenticated successfully under PN: {personnelNumber}");
+                }
                 // Handle successful authentication, e.g., issue a token or set a cookie
-                return Ok("User authenticated successfully.");
+                return Unauthorized("User Personnel Number is not yet assigned");
             }
             else
             {
-                // Handle failed authentication
-                return Unauthorized("Authentication failed.");
+                return Unauthorized("Authentication failed.");// Handle failed authentication
             }
+        }
+
+        private bool CheckForValidPersonnelNumber(string input)
+        {
+            string pattern = @"^\d{10}$";
+
+            if (Regex.IsMatch(input, pattern))
+            {
+                return true;
+            }
+            return false;
         }
     }
 }

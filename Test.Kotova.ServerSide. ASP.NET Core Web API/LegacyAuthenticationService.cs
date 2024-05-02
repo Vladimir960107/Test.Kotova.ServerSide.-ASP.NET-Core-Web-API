@@ -27,11 +27,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _context = context;
         }
 
-        public async Task<bool> PerformLogin(string username, string password)
+        public async Task<string?> PerformLogin(string username, string password)
         {
             // Check username and password
-            bool isAuthenticated = await AuthenticateUserAsync(username, password);
-            if (isAuthenticated)
+            (bool,string?) isAuthenticated = await SimpleAuthenticationUserAsync(username, password);
+            if (isAuthenticated.Item1)
             {
                 /*
                 // Generate 2FA code
@@ -41,9 +41,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 // Send the code via email
                 await SendTwoFactorCodeEmail(username, twoFactorCode); //THIS ALL CODE IS FOR 2-FACTOR AUTHENTICATION
                 */
-                return true;
+                return isAuthenticated.Item2;
             }
-            return false;
+            return null;
         }
 
         
@@ -63,17 +63,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
 
         */
 
-        public async Task<bool> AuthenticateUserAsync(string username, string password)
+        public async Task<(bool, string?)> SimpleAuthenticationUserAsync(string username, string password)
         {
             // Fetch the user from the database
             var user = await _context.Users.FirstOrDefaultAsync(u => u.username == username);
 
-            // Check if user exists and password matches
-            if (user != null && VerifyPassword(password, user.password_hash))
+            if (user == null || !VerifyPassword(password, user.password_hash))
             {
-                return true;
+                return (false, null);
             }
-            return false;
+            // Check if user exists and password matches
+            if (user.current_personnel_number is null)
+            {
+                return (true, "user is not currently registrated to personnel number");
+
+            }
+            return (true, user.current_personnel_number);
+
         }
 
 
@@ -83,14 +89,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             // This could be a simple comparison or a more complex hash verification
             return providedPassword == storedHash; // Simplified for illustration
         }
-        /* РАЗБЛОКИРУЙ ЭТО И ПРОДОЛЖАЙ!
+        // Вроде как это уже не нужно. Можешь убрать?
+        /*
         public async Task<ApplicationUser> GetByUserNameAndPassword(string username, string password)
         {
             if (await (PerformLogin(username, password)))
             {
             }
         }
-
+        */
         /*
 
         public async Task<bool> AuthenticateUserAsyncLegacy(string username, string password)
