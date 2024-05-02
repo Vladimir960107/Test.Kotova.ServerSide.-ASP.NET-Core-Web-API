@@ -312,7 +312,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 var claims = new List<Claim>
                 {
                     new Claim(ClaimTypes.Name, model.username),
-                    new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
+                    //new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
                 };
                 return Ok($"User authenticated successfully under user: {model.username}");
             }
@@ -322,7 +322,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             else
             {
-                return Unauthorized("Authentication failed.");// Handle failed authentication
+                return Unauthorized("Authentication failed.");
             }
         }
 
