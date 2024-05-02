@@ -6,6 +6,7 @@ using System.Text;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 using Kotova.CommonClasses;
+using DocumentFormat.OpenXml.Drawing.Diagrams;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
@@ -27,11 +28,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _context = context;
         }
 
-        public async Task<string?> PerformLogin(string username, string password)
+        public async Task<(bool?, User?)> PerformLogin(string username, string password)
         {
             // Check username and password
-            (bool,string?) isAuthenticated = await SimpleAuthenticationUserAsync(username, password);
-            if (isAuthenticated.Item1)
+            (bool?,User?) isAuthenticated = await SimpleAuthenticationUserAsync(username, password);
+            if (isAuthenticated.Item2 is not null && isAuthenticated.Item2.current_email is not null)
             {
                 /*
                 // Generate 2FA code
@@ -40,10 +41,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 SaveTwoFactorCode(username, twoFactorCode);
                 // Send the code via email
                 await SendTwoFactorCodeEmail(username, twoFactorCode); //THIS ALL CODE IS FOR 2-FACTOR AUTHENTICATION
+                IF AUTHENTICATED - 
+                return (true, isAuthenticated.Item2);
+                IF NOT AUTHENTICATED -
+                return (false, isAuthenticated.Item2);
                 */
-                return isAuthenticated.Item2;
+                // IN CASE HE IS NOT AUTHENTICATED - CODE AT THE TOP THAT IS COMMENTED SHOULD RETURN FALSE AND STUFF!
             }
-            return null;
+            else if (isAuthenticated.Item2 is not null && isAuthenticated.Item2.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
+            {
+                //return something
+                //CHECK BY NUMBER OR JUST FORGET ABOUT IT ¯\_(ツ)_/¯
+                return isAuthenticated; //gonna return (true, User)
+            }
+            else if (isAuthenticated.Item1 is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
+            {
+                return isAuthenticated; // gonna return (null,User)
+            }
+            return isAuthenticated; // gonna return (false, User)
         }
 
         
@@ -63,7 +78,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
 
         */
 
-        public async Task<(bool, string?)> SimpleAuthenticationUserAsync(string username, string password)
+        public async Task<(bool?, User?)> SimpleAuthenticationUserAsync(string username, string password)
         {
             // Fetch the user from the database
             var user = await _context.Users.FirstOrDefaultAsync(u => u.username == username);
@@ -75,10 +90,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             // Check if user exists and password matches
             if (user.current_personnel_number is null)
             {
-                return (true, "user is not currently registrated to personnel number");
+                return (null, user);
 
             }
-            return (true, user.current_personnel_number);
+            return (true, user);
 
         }
 

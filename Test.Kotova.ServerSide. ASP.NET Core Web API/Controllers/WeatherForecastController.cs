@@ -10,6 +10,8 @@ using System.Text;
 using System.Security.Claims;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 using System.Text.RegularExpressions;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -303,29 +305,46 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
-            Console.WriteLine(model.username);
-            string? personnelNumber = await _legacyAuthService.PerformLogin(model.username, model.password);
-            /*
-            var claims = new List<Claim>
+            (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(model.username, model.password);
+            User? user = authenticationModel.Item2;
+            if (authenticationModel.Item1 == true)
             {
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.Role, user.Role),
-            }
-            */
-            if (personnelNumber is not null)
-            {
-                if (CheckForValidPersonnelNumber(personnelNumber))
+                var claims = new List<Claim>
                 {
-                    return Ok($"User authenticated successfully under PN: {personnelNumber}");
-                }
-                // Handle successful authentication, e.g., issue a token or set a cookie
-                return Unauthorized("User Personnel Number is not yet assigned");
+                    new Claim(ClaimTypes.Name, model.username),
+                    new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
+                };
+                return Ok($"User authenticated successfully under user: {model.username}");
+            }
+            else if (authenticationModel.Item1 == null)
+            {
+                return Unauthorized("User doesn't have personnel number yet, wait when you gonna have personnel number");
             }
             else
             {
                 return Unauthorized("Authentication failed.");// Handle failed authentication
             }
+        }
+
+        private string RoleModelIntToString(int user_role)
+        {
+            if (user_role == 1)
+            {
+                return "user";
+            }
+            else if (user_role == 2)
+            {
+                return "Chief of department";
+            }
+            else if (user_role == 3)
+            {
+                return "Coordinator";
+            }
+            else if (user_role == 4)
+            {
+                return "admin";
+            }
+            throw new ArgumentException($"user_role:{user_role} is not valid, something is wrong!");
         }
 
         private bool CheckForValidPersonnelNumber(string input)
@@ -338,5 +357,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             return false;
         }
+        public string GenerateJwtToken(List<Claim> claims, string secret)
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken(
+                issuer: "yourdomain.com",
+                audience: "yourdomain.com",
+                claims: claims,
+                expires: DateTime.Now.AddMinutes(30),
+                signingCredentials: creds);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
     }
+
 }
