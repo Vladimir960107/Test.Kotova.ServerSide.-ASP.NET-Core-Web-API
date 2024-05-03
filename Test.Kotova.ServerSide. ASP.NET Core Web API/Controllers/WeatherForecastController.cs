@@ -14,6 +14,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using System.Runtime.ConstrainedExecution;
+using Microsoft.Extensions.Configuration;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -21,12 +22,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     [Route("[controller]")]
     public class WeatherForecastController : ControllerBase
     {
+       
+
+        private readonly ILogger<WeatherForecastController> _logger;
+
         private static readonly string[] Summaries = new[]
         {
             "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
         };
-
-        private readonly ILogger<WeatherForecastController> _logger;
 
         public WeatherForecastController(ILogger<WeatherForecastController> logger)
         {
@@ -299,11 +302,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
         private readonly NotificationsService _NotificationsService;
-
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, NotificationsService notificationsService)
+        private readonly IConfiguration _configuration;
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, NotificationsService notificationsService, IConfiguration configuration)
         {
             _legacyAuthService = legacyAuthService;
             _NotificationsService = notificationsService;
+            _configuration = configuration;
         }
 
         [HttpPost("login")]
@@ -321,10 +325,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
                     };
 
-                    string secret = "your_secret_key"; // Remember to store this securely and not hardcode in production
+                    string secret = _configuration["JwtConfig:Secret"]; // Remember to store this securely and not hardcode in production
                     var token = GenerateJwtToken(claims, secret);
 
-                    return Ok($"User authenticated successfully under user: {model.username}");
+                    return Ok(new { Token = token, Message = "User authenticated successfully." });
                 }
                 catch (ArgumentException ex)
                 {
