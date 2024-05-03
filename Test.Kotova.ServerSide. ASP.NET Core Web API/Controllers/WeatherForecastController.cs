@@ -12,6 +12,8 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 using System.Text.RegularExpressions;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
+using System.Runtime.ConstrainedExecution;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -296,25 +298,39 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     public class AuthenticationController : ControllerBase
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
+        private readonly NotificationsService _NotificationsService;
 
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService)
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, NotificationsService notificationsService)
         {
             _legacyAuthService = legacyAuthService;
+            _NotificationsService = notificationsService;
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
             (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(model.username, model.password);
-            User? user = authenticationModel.Item2;
             if (authenticationModel.Item1 == true)
             {
-                var claims = new List<Claim>
+                try
                 {
-                    new Claim(ClaimTypes.Name, model.username),
-                    //new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
-                };
-                return Ok($"User authenticated successfully under user: {model.username}");
+                    User? user = authenticationModel.Item2;
+                    var claims = new List<Claim>
+                    {
+                        new Claim(ClaimTypes.Name, model.username),
+                        new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
+                    };
+
+                    string secret = "your_secret_key"; // Remember to store this securely and not hardcode in production
+                    var token = GenerateJwtToken(claims, secret);
+
+                    return Ok($"User authenticated successfully under user: {model.username}");
+                }
+                catch (ArgumentException ex)
+                {
+                    return BadRequest(ex.Message);
+                }
+                
             }
             else if (authenticationModel.Item1 == null)
             {
@@ -326,15 +342,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        [HttpGet]
+        [Route("notifications")]
+        [Authorize]
+        //[Authorize(Policy = "CanAccessNotifications")] // ITS FOR ADMIN, CHECK Program.cs and rewrite builder.Services.AddAuthorization for use, in case you want admin not to get notifications.
+        public IActionResult GetNotifications() // HERE WE GET TOKEN OR USER OR SOMETHING. FOR THE FIRST TIME WE GET USER and password again. BUT PROBABLY NEED JWT TOKEN(WITH USER INSIDE IT)
+        {
+            // Fetch notifications for the authenticated user
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            Console.WriteLine(userId is not null ? userId.ToString() : "NothingFound");
+            //var notifications = _NotificationsService.GetNotificationsForUser(userId);
+
+            //return Ok(notifications);
+            return Ok();
+        }
+
         private string RoleModelIntToString(int user_role)
         {
             if (user_role == 1)
             {
-                return "user";
+                return "User";
             }
             else if (user_role == 2)
             {
-                return "Chief of department";
+                return "Chief Of Department";
             }
             else if (user_role == 3)
             {
@@ -342,7 +373,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             else if (user_role == 4)
             {
-                return "admin";
+                return "Administrator";
             }
             throw new ArgumentException($"user_role:{user_role} is not valid, something is wrong!");
         }

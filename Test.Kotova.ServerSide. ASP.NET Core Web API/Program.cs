@@ -21,6 +21,8 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
+builder.Services.AddDbContext<ApplicationDBNotificationContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForNotifications")));
 
 builder.Services.AddAuthentication("CookieAuth")
     .AddCookie("CookieAuth", options =>
@@ -32,10 +34,22 @@ builder.Services.AddAuthentication("CookieAuth")
         options.SlidingExpiration = true;
     });
 
-
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanAccessNotifications", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context =>
+        {
+            // Allow access for all authenticated users except admins
+            return !context.User.IsInRole("Administrator");
+        });
+    });
+});
 
 
 builder.Services.AddScoped<LegacyAuthenticationService>();//Try to understand what you have done here :)
+builder.Services.AddScoped<NotificationsService>();
 
 //builder.Services.AddTransient<IEmailService, EmailService>(); //for 2-factor authentication
 
