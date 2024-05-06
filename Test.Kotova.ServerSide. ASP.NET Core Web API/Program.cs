@@ -7,6 +7,9 @@ using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.Extensions.Configuration;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +27,24 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddDbContext<ApplicationDBNotificationContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForNotifications")));
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = "yourdomain.com",
+            ValidAudience = "yourdomain.com",
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"])),
+            //ClockSkew = TimeSpan.Zero // REMOVE THIS in PRODUCTION, Cause without this line ADDS +5 Minute clock to jwt token
+        };
+    });
+
+/*
 builder.Services.AddAuthentication("CookieAuth")
     .AddCookie("CookieAuth", options =>
     {
@@ -33,7 +54,7 @@ builder.Services.AddAuthentication("CookieAuth")
         options.LogoutPath = "/logout"; // Custom logout path if needed
         options.SlidingExpiration = true;
     });
-
+*/
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CanAccessNotifications", policy =>
@@ -65,6 +86,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

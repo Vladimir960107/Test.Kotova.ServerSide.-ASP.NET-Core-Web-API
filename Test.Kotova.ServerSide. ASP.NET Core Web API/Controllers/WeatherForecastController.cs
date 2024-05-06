@@ -18,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("[controller]")]
     public class WeatherForecastController : ControllerBase
@@ -42,13 +43,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok("Hello, World!");
         }
 
-        [HttpPost("upload")]
+        [HttpPost("upload")] //—ƒ≈À¿“‹ œ–Œ¬≈– ” œŒ –¿«Ã≈–” ‘¿…À¿ EXCEL, ÔÓ ÒÓ‚ÂÚÛ ÏÂÌÚÓ‡
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("Please upload a file.");
 
-            // Check the MIME type to see if it's an Excel file
+            // Check the MIME type to see if it's an Excel file 
             string[] permittedMimeTypes = new string[]
             {
                 "application/vnd.ms-excel",
@@ -350,15 +351,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [Route("notifications")]
         [Authorize]
         //[Authorize(Policy = "CanAccessNotifications")] // ITS FOR ADMIN, CHECK Program.cs and rewrite builder.Services.AddAuthorization for use, in case you want admin not to get notifications.
-        public IActionResult GetNotifications() // HERE WE GET TOKEN OR USER OR SOMETHING. FOR THE FIRST TIME WE GET USER and password again. BUT PROBABLY NEED JWT TOKEN(WITH USER INSIDE IT)
+        public IActionResult GetNotifications()
         {
-            // Fetch notifications for the authenticated user
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            Console.WriteLine(userId is not null ? userId.ToString() : "NothingFound");
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             //var notifications = _NotificationsService.GetNotificationsForUser(userId);
 
             //return Ok(notifications);
-            return Ok();
+            return Ok(new
+            {
+                
+            });
+        }
+
+        [Authorize]
+        [HttpGet("securedata")]
+        public IActionResult GetSecureData()
+        {
+            return Ok("This is secured data.");
         }
 
         private string RoleModelIntToString(int user_role)
