@@ -237,9 +237,9 @@ class DBProcessor
 
         return names; // Return the list of names
     }
-    public List<Notification> GetInstructions(string connectionString) //This function is similar to GetNames
+    public List<Instruction> GetInstructions(string connectionString) //This function is similar to GetNames
     {
-        var instructions = new List<Notification>();
+        var instructions = new List<Instruction>();
         using (var connection = new SqlConnection(connectionString))
         {
             connection.Open();
@@ -255,7 +255,42 @@ class DBProcessor
                         var name = reader[tableName_sql_INSTRUCTIONS_cause] as string;
                         if (name != null)
                         {
-                            Notification notification = new Notification(name);
+                            Instruction notification = new Instruction(name);
+                            instructions.Add(notification);
+
+                        }
+                        else
+                        {
+                            // Optionally handle or log null values here
+                        }
+                    }
+                    reader.Close();
+                }
+            }
+        }
+
+        return instructions;
+    }
+
+    public List<Instruction> getNotificationsByUserInDataBase(string userName)
+    {
+        var instructions = new List<Instruction>();
+        using (var connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+            var query = $"SELECT {tableName_sql_INSTRUCTIONS_cause} FROM {tableName_Instructions_sql}";
+
+            using (var command = new SqlCommand(query, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+
+                        var name = reader[tableName_sql_INSTRUCTIONS_cause] as string;
+                        if (name != null)
+                        {
+                            Instruction notification = new Instruction(name);
                             instructions.Add(notification);
 
                         }

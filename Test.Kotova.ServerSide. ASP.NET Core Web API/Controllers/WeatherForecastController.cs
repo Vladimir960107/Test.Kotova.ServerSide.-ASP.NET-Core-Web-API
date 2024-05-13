@@ -18,29 +18,37 @@ using Microsoft.Extensions.Configuration;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("[controller]")]
-    public class WeatherForecastController : ControllerBase
+    public class InstructionsController : ControllerBase
     {
-       
 
-        private readonly ILogger<WeatherForecastController> _logger;
-
-        private static readonly string[] Summaries = new[]
-        {
-            "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-        };
-
-        public WeatherForecastController(ILogger<WeatherForecastController> logger)
-        {
-            _logger = logger;
-        }
-
+        [Authorize]
         [HttpGet("greeting")]
         public IActionResult GetGreeting()
         {
             return Ok("Hello, World!");
+        }
+
+        [Authorize]
+        [HttpGet("get_instructions_for_user")]
+        public IActionResult GetInstructionsForUser()
+        {
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string fuckOffResponse = "Unknown User, so f*ck off:)";
+            if (userName is null)
+            {
+                return BadRequest(fuckOffResponse);
+            }
+            List<Instruction> instructions = getInstructionsByUserInDataBase(userName);
+            string serialized = JsonConvert.SerializeObject(instructions);
+            string encryptedData = Encryption_Kotova.EncryptString(serialized);
+            return Ok(encryptedData);
+        }
+
+        private List<Instruction> getInstructionsByUserInDataBase(string userName)
+        {
+            throw new NotImplementedException(); //Õ¿◊»Õ¿… ƒ≈À¿“‹!
         }
 
         [HttpPost("upload")] //—ƒ≈À¿“‹ œ–Œ¬≈– ” œŒ –¿«Ã≈–” ‘¿…À¿ EXCEL, ÔÓ ÒÓ‚ÂÚÛ ÏÂÌÚÓ‡
@@ -195,7 +203,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 DBProcessor example = new DBProcessor();
-                List<Notification> notifications = example.GetInstructions(example.GetConnectionString());
+                List<Instruction> notifications = example.GetInstructions(example.GetConnectionString());
                 string serialized = JsonConvert.SerializeObject(notifications);
                 string encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);

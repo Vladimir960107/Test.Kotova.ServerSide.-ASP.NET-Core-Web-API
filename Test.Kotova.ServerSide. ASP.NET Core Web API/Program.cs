@@ -55,18 +55,55 @@ builder.Services.AddAuthentication("CookieAuth")
         options.SlidingExpiration = true;
     });
 */
-builder.Services.AddAuthorization(options =>
+builder.Services.AddAuthorization(options => // ÎÃÐÀÍÈ×Ü ÄÎÑÒÓÏ ÀÄÌÈÍÈÑÒÐÀÒÎÐÀÌ ÒÎËÜÊÎ ÍÀ ×ÒÅÍÈÅ È ÒÎ ÕÐÅÍ ÅÃÎ ÇÍÀÅÒ?
 {
-    options.AddPolicy("CanAccessNotifications", policy =>
+    options.AddPolicy("Coordinator", policy =>
     {
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(context =>
         {
-            // Allow access for all authenticated users except admins
-            return !context.User.IsInRole("Administrator");
+            return context.User.IsInRole("Coordinator");
         });
     });
 });
+
+builder.Services.AddAuthorization(options =>  // ÎÃÐÀÍÈ×Ü ÄÎÑÒÓÏ ÀÄÌÈÍÈÑÒÐÀÒÎÐÀÌ ÒÎËÜÊÎ ÍÀ ×ÒÅÍÈÅ È ÒÎ ÕÐÅÍ ÅÃÎ ÇÍÀÅÒ?
+{
+    options.AddPolicy("ChiefOfDepartment", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context =>
+        {
+            return context.User.IsInRole("Chief Of Department");
+        });
+    });
+});
+
+builder.Services.AddAuthorization(options => // ÎÃÐÀÍÈ×Ü ÄÎÑÒÓÏ ÀÄÌÈÍÈÑÒÐÀÒÎÐÀÌ ÒÎËÜÊÎ ÍÀ ×ÒÅÍÈÅ åñëè çäåñü òîæå íóæíî È ÒÎ ÕÐÅÍ ÅÃÎ ÇÍÀÅÒ?
+{
+    options.AddPolicy("User", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context =>
+        {
+            return context.User.IsInRole("User");
+        });
+    });
+});
+
+builder.Services.AddAuthorization(options => // ÎÃÐÀÍÈ×Ü ÄÎÑÒÓÏ ÀÄÌÈÍÈÑÒÐÀÒÎÐÀÌ ÒÎËÜÊÎ ÍÀ ×ÒÅÍÈÅ åñëè çäåñü òîæå íóæíî È ÒÎ ÕÐÅÍ ÅÃÎ ÇÍÀÅÒ?
+{
+    options.AddPolicy("Administrator", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context =>
+        {
+            return context.User.IsInRole("Administrator");
+        });
+    });
+});
+
+
 
 
 builder.Services.AddScoped<LegacyAuthenticationService>();//Try to understand what you have done here :)
