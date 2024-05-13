@@ -10,6 +10,7 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -108,6 +109,7 @@ builder.Services.AddAuthorization(options => // ÎÃĞÀÍÈ×Ü ÄÎÑÒÓÏ ÀÄÌÈÍÈÑÒĞÀÒÎĞÀÌ 
 
 builder.Services.AddScoped<LegacyAuthenticationService>();//Try to understand what you have done here :)
 builder.Services.AddScoped<NotificationsService>();
+builder.Services.AddScoped<MyDataService>();
 
 //builder.Services.AddTransient<IEmailService, EmailService>(); //for 2-factor authentication
 

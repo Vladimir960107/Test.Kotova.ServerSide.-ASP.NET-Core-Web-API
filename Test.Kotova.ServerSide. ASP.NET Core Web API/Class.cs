@@ -25,6 +25,8 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using System.Net;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
+using Microsoft.Extensions.Configuration;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -47,6 +49,10 @@ class DBProcessor
     private const string connectionString_server = "localhost";
     private const string connectionString_database = "TestDB";
 
+    public string tableName_pos_users = "users";
+    public string columnName_sql_pos_users_username = "username";
+    public string columnName_sql_pos_users_PN = "current_personnel_number";
+
     private const string tableName_sql_USER_instruction_id = "instruction_id";
     private const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
     private const string tableName_sql_USER_datePassed = "date_when_passed";
@@ -56,7 +62,7 @@ class DBProcessor
 
     private const string birthDate_format = "yyyy-MM-dd";
 
-    public string GetConnectionString()
+    public string GetConnectionString() // ВЕЗДЕ ПЕРЕПИСАТЬ ЭТУ ФИГНЮ НА То что из Program.cs, чтобы подключение было нормальным
     {
         // Use Windows Authentication for simplicity and security
         return $"Server={connectionString_server};Database={connectionString_database};Integrated Security=True;";
@@ -275,7 +281,7 @@ class DBProcessor
     public List<Instruction> getNotificationsByUserInDataBase(string userName)
     {
         var instructions = new List<Instruction>();
-        using (var connection = new SqlConnection(connectionString))
+        using (var connection = new SqlConnection(connectionString_database))
         {
             connection.Open();
             var query = $"SELECT {tableName_sql_INSTRUCTIONS_cause} FROM {tableName_Instructions_sql}";
@@ -539,7 +545,7 @@ class DBProcessor
                         }
                         int instructionId_NonNull = instructionId ?? default(int);
 
-                        List<string> personelNumbers = await FindPNsOfNames(package.NamesAndBirthDates, connection, transaction);
+                        List<string> personelNumbers = await FindPNsOfNamesAndBirthDates(package.NamesAndBirthDates, connection, transaction);
                         if (personelNumbers.Count == 0)
                         {
                             Console.WriteLine("Couldn't find personelNumbers by full names");
@@ -593,12 +599,12 @@ class DBProcessor
         return instructionId;
     }
 
-    private async Task<List<string>> FindPNsOfNames(List<Tuple<string, string>>? namesAndBirthDatesString, SqlConnection connection, SqlTransaction transaction)
+    private async Task<List<string>> FindPNsOfNamesAndBirthDates(List<Tuple<string, string>>? namesAndBirthDatesString, SqlConnection connection, SqlTransaction transaction)
     {
-        if (namesAndBirthDatesString is null ||!namesAndBirthDatesString.Any() ) { throw new ArgumentException("namesAndBirthDatesString is empty!"); }
+        if (namesAndBirthDatesString is null || !namesAndBirthDatesString.Any()) { throw new ArgumentException("namesAndBirthDatesString is empty!"); }
         (List<string> names, List<DateTime> birthDates) = DeconstructNamesAndBirthDates(namesAndBirthDatesString);
         string query = $"SELECT {tableName_sql_PN} FROM {tableName_sql_MainName} WHERE {tableName_sql_names} = @name AND {tableName_sql_BirthDate} = @birthDate";
-       
+
         List<string> PersonalNumbers = new List<string>();
 
         for (int i = 0; i < names.Count; i++)
@@ -683,6 +689,7 @@ class DBProcessor
             return false;
         }
     }
+        
 }
 
 

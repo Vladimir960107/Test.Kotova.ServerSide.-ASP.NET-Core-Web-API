@@ -15,6 +15,7 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using System.Runtime.ConstrainedExecution;
 using Microsoft.Extensions.Configuration;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -22,6 +23,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     [Route("[controller]")]
     public class InstructionsController : ControllerBase
     {
+        private readonly MyDataService _dataService;
+
+        public InstructionsController(MyDataService dataService)
+        {
+
+            _dataService = dataService;
+        }
 
         [Authorize]
         [HttpGet("greeting")]
@@ -30,9 +38,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok("Hello, World!");
         }
 
-        [Authorize]
-        [HttpGet("get_instructions_for_user")]
-        public IActionResult GetInstructionsForUser()
+        /*[Authorize]
+        [HttpGet("get_instructions_for_user")]*/
+        /*public IActionResult GetInstructionsForUser()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string fuckOffResponse = "Unknown User, so f*ck off:)";
@@ -42,6 +50,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             List<Instruction> instructions = getInstructionsByUserInDataBase(userName);
             string serialized = JsonConvert.SerializeObject(instructions);
+            string encryptedData = Encryption_Kotova.EncryptString(serialized);
+            return Ok(encryptedData);
+        }*/
+        [Authorize]
+        [HttpGet("get_instructions_for_user")]
+        public async Task<IActionResult> GetNotifications()
+        {
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            string? tableNameForUser = await _dataService.UserNameToTableName(userName);
+            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
+            Console.WriteLine(tableNameForUser);
+            List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser);
+            string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
             return Ok(encryptedData);
         }
@@ -310,12 +332,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     public class AuthenticationController : ControllerBase
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
-        private readonly NotificationsService _NotificationsService;
         private readonly IConfiguration _configuration;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, NotificationsService notificationsService, IConfiguration configuration)
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration)
         {
             _legacyAuthService = legacyAuthService;
-            _NotificationsService = notificationsService;
             _configuration = configuration;
         }
 
@@ -359,17 +379,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [Route("notifications")]
         [Authorize]
         //[Authorize(Policy = "CanAccessNotifications")] // ITS FOR ADMIN, CHECK Program.cs and rewrite builder.Services.AddAuthorization for use, in case you want admin not to get notifications.
-        public IActionResult GetNotifications()
+        public async Task<IActionResult> GetNotifications()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
-            //var notifications = _NotificationsService.GetNotificationsForUser(userId);
 
             //return Ok(notifications);
-            return Ok(new
-            {
-                
-            });
+            return Ok();
         }
 
         [Authorize]
