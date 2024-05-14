@@ -5,6 +5,8 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using System.Data.SqlClient;
 using System.Data;
 using Microsoft.Data.SqlClient;
+using Kotova.CommonClasses;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 {
@@ -27,7 +29,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
                 using (var command = conn.CreateCommand())
-                {
+                { 
+                    
                     command.CommandText = $"SELECT {temp.columnName_sql_pos_users_PN} FROM [{temp.tableName_pos_users}] WHERE {temp.columnName_sql_pos_users_username} = @UserName";
                     command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@UserName", SqlDbType.VarChar) { Value = userName });
 
@@ -51,20 +54,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
-            
             // Ensure the tableName is a valid 10-digit number to prevent SQL Injection
             if (!Regex.IsMatch(tableName, @"^\d{10}$"))
             {
                 throw new ArgumentException("Invalid table name");
             }
-
+            string sqlQuery = @$"
+SELECT 
+    t.ID,
+    t.instruction_id,
+    t.when_was_send_to_user,
+    i.path_to_instruction,
+    i.cause_of_instruction,
+    i.type_of_instruction
+FROM 
+    [{tableName}] t
+INNER JOIN 
+    Instructions i ON t.instruction_id = i.instruction_id
+WHERE 
+    t.is_instruction_passed = 0"; // ADD THIS STUFF INTO ADDITIONAL FILE OR SOMETHING
+            // AND RENAME in SELECT table names into common classes constants!
             using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
                 using (var command = conn.CreateCommand())
                 {
-                    command.CommandText = $"SELECT * FROM [{tableName}]";
+                    command.CommandText = sqlQuery;
+
                     using (var reader = await command.ExecuteReaderAsync())
                     {
                         var result = new List<Dictionary<string, object>>();

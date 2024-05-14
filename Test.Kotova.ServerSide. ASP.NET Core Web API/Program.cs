@@ -1,27 +1,59 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
-using System.Net.Http;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
-using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
-using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.Extensions.Configuration;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.ListenAnyIP(5239); // Set HTTP port
+    serverOptions.ListenAnyIP(7052, listenOptions => // Set HTTPS port
+    {
+        listenOptions.UseHttps();
+    });
+});
 
 // Add services to the container.
-
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "My API", Version = "v1" });
+
+    // Add JWT Authentication to Swagger
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description = "¬‚Â‰ËÚÂ ÚÓÍÂÌ ‚ ÙÓÏ‡ÚÂ 'Bearer {token}'",
+        Name = "Authorization",
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+});
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
@@ -40,23 +72,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = "yourdomain.com",
             ValidAudience = "yourdomain.com",
             IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"])),
-            //ClockSkew = TimeSpan.Zero // REMOVE THIS in PRODUCTION, Cause without this line ADDS +5 Minute clock to jwt token
+                Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"]))
         };
     });
 
-/*
-builder.Services.AddAuthentication("CookieAuth")
-    .AddCookie("CookieAuth", options =>
-    {
-        options.Cookie.HttpOnly = true;
-        options.ExpireTimeSpan = TimeSpan.FromMinutes(60);
-        options.LoginPath = "/login"; // Custom login path if needed
-        options.LogoutPath = "/logout"; // Custom logout path if needed
-        options.SlidingExpiration = true;
-    });
-*/
-builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã “ŒÀ‹ Œ Õ¿ ◊“≈Õ»≈ » “Œ ’–≈Õ ≈√Œ «Õ¿≈“?
+builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Coordinator", policy =>
     {
@@ -66,10 +86,6 @@ builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã 
             return context.User.IsInRole("Coordinator");
         });
     });
-});
-
-builder.Services.AddAuthorization(options =>  // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã “ŒÀ‹ Œ Õ¿ ◊“≈Õ»≈ » “Œ ’–≈Õ ≈√Œ «Õ¿≈“?
-{
     options.AddPolicy("ChiefOfDepartment", policy =>
     {
         policy.RequireAuthenticatedUser();
@@ -78,10 +94,6 @@ builder.Services.AddAuthorization(options =>  // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã
             return context.User.IsInRole("Chief Of Department");
         });
     });
-});
-
-builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã “ŒÀ‹ Œ Õ¿ ◊“≈Õ»≈ ÂÒÎË Á‰ÂÒ¸ ÚÓÊÂ ÌÛÊÌÓ » “Œ ’–≈Õ ≈√Œ «Õ¿≈“?
-{
     options.AddPolicy("User", policy =>
     {
         policy.RequireAuthenticatedUser();
@@ -90,10 +102,6 @@ builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã 
             return context.User.IsInRole("User");
         });
     });
-});
-
-builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã “ŒÀ‹ Œ Õ¿ ◊“≈Õ»≈ ÂÒÎË Á‰ÂÒ¸ ÚÓÊÂ ÌÛÊÌÓ » “Œ ’–≈Õ ≈√Œ «Õ¿≈“?
-{
     options.AddPolicy("Administrator", policy =>
     {
         policy.RequireAuthenticatedUser();
@@ -104,30 +112,43 @@ builder.Services.AddAuthorization(options => // Œ√–¿Õ»◊‹ ƒŒ—“”œ ¿ƒÃ»Õ»—“–¿“Œ–¿Ã 
     });
 });
 
-
-
-
-builder.Services.AddScoped<LegacyAuthenticationService>();//Try to understand what you have done here :)
+builder.Services.AddScoped<LegacyAuthenticationService>();
 builder.Services.AddScoped<NotificationsService>();
 builder.Services.AddScoped<MyDataService>();
 
-//builder.Services.AddTransient<IEmailService, EmailService>(); //for 2-factor authentication
-
-
 var app = builder.Build();
-
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+else 
+{
+    // Œ„‡ÌË˜¸ÚÂ ‰ÓÒÚÛÔ Í Swagger UI ‚ ÔÓËÁ‚Ó‰ÒÚ‚ÂÌÌÓÈ ÒÂ‰Â 
+    //!!!!!!!!!!your-secret-key - Á‡¯ËÙÛÈ Â„Ó, ‰Ó·‡‚¸ ‚ ÓÚ‰ÂÎ¸Ì˚È Ù‡ÈÎ Ë ÒÔˇ˜¸!
+    app.UseWhen(context => context.Request.Path.StartsWithSegments("/swagger"), appBuilder =>
+    {
+        appBuilder.Use(async (context, next) =>
+        {
+            if (!context.Request.Headers.ContainsKey("X-Swagger-Auth") || context.Request.Headers["X-Swagger-Auth"] != "your-secret-key") 
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Unauthorized");
+                return;
+            }
+
+            await next();
+        });
+    });
+
+    app.UseSwagger();
+    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API v1"));
+}
+
 
 app.UseHttpsRedirection();
-
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
 app.Run();
-

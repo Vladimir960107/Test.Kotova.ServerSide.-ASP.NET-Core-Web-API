@@ -38,21 +38,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok("Hello, World!");
         }
 
-        /*[Authorize]
-        [HttpGet("get_instructions_for_user")]*/
-        /*public IActionResult GetInstructionsForUser()
-        {
-            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string fuckOffResponse = "Unknown User, so f*ck off:)";
-            if (userName is null)
-            {
-                return BadRequest(fuckOffResponse);
-            }
-            List<Instruction> instructions = getInstructionsByUserInDataBase(userName);
-            string serialized = JsonConvert.SerializeObject(instructions);
-            string encryptedData = Encryption_Kotova.EncryptString(serialized);
-            return Ok(encryptedData);
-        }*/
         [Authorize]
         [HttpGet("get_instructions_for_user")]
         public async Task<IActionResult> GetNotifications()
@@ -61,7 +46,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
-            Console.WriteLine(tableNameForUser);
             List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser);
             string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
