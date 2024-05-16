@@ -52,6 +52,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok(encryptedData);
         }
 
+
+        [Authorize]
+        [HttpPost("instruction_is_passed_by_user")] // Здесь нужна кодировка вместо Dictionary - string, которая зашифрована.!!!!!!!!
+        public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonStrDictionary) 
+        {
+            /*if (string.IsNullOrWhiteSpace(jsonStrDictionary)) 
+            { 
+                return BadRequest("Dictionary is empty or null on server side"); 
+            }*/
+            return Ok("Instruction Is passed, information added to Database");
+        }
+
+        
+
         private List<Instruction> getInstructionsByUserInDataBase(string userName)
         {
             throw new NotImplementedException(); //НАЧИНАЙ ДЕЛАТЬ!

@@ -33,34 +33,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 class DBProcessor
 {
 
-    private const double DEVIATION = 0.00001;
-    private const string tableName_sql_index = "index";
-    private const string tableName_sql_names = "names";
-    private const string tableName_sql_jobPosition = "job_position";
-    private const string tableName_sql_isDriver = "is_driver";
-    private const string tableName_sql_BirthDate = "birth_date";
-    private const string tableName_sql_gender = "gender";
-    private const string tableName_sql_PN = "personnel_number";
-    private const string tableName_sql_department = "department";
-    private const string tableName_sql_group = "group";
+    public const double DEVIATION = 0.00001;
+    public const string tableName_sql_index = "index";
+    public const string tableName_sql_names = "names";
+    public const string tableName_sql_jobPosition = "job_position";
+    public const string tableName_sql_isDriver = "is_driver";
+    public const string tableName_sql_BirthDate = "birth_date";
+    public const string tableName_sql_gender = "gender";
+    public const string tableName_sql_PN = "personnel_number";
+    public const string tableName_sql_department = "department";
+    public const string tableName_sql_group = "group";
 
-    private const string tableName_sql_MainName = "dbo.TableTest";
-    private const string tableName_Instructions_sql = "dbo.Instructions";
-    private const string connectionString_server = "localhost";
-    private const string connectionString_database = "TestDB";
+    public const string tableName_sql_MainName = "dbo.TableTest";
+    public const string tableName_Instructions_sql = "dbo.Instructions";
+    public const string connectionString_server = "localhost";
+    public const string connectionString_database = "TestDB";
 
-    public string tableName_pos_users = "users";
-    public string columnName_sql_pos_users_username = "username";
-    public string columnName_sql_pos_users_PN = "current_personnel_number";
+    public const string tableName_pos_users = "users";
+    public const string columnName_sql_pos_users_username = "username";
+    public const string columnName_sql_pos_users_PN = "current_personnel_number";
 
-    private const string tableName_sql_USER_instruction_id = "instruction_id";
-    private const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
-    private const string tableName_sql_USER_datePassed = "date_when_passed";
-    private const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
-    private const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
-    private const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
+    public const string tableName_sql_USER_instruction_id = "instruction_id";
+    public const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
+    public const string tableName_sql_USER_datePassed = "date_when_passed";
+    public const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
+    public const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
+    public const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
 
-    private const string birthDate_format = "yyyy-MM-dd";
+    public const string birthDate_format = "yyyy-MM-dd";
 
     public string GetConnectionString() // ВЕЗДЕ ПЕРЕПИСАТЬ ЭТУ ФИГНЮ НА То что из Program.cs, чтобы подключение было нормальным
     {
@@ -114,7 +114,6 @@ class DBProcessor
             counter++;
             if (!TryParseRowAndValidate(row, out var rowData, connection, transaction, columnNumbersExcel, counter))
             {
-                // Log and skip the row if parsing failed
                 continue;
             }
             try
