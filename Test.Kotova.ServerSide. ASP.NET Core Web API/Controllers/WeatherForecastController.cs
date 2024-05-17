@@ -16,6 +16,12 @@ using Microsoft.AspNetCore.Authorization;
 using System.Runtime.ConstrainedExecution;
 using Microsoft.Extensions.Configuration;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
+using System.Collections.Generic;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.Extensions.Options;
+using System.Data.Common;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -55,16 +61,67 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         [Authorize]
         [HttpPost("instruction_is_passed_by_user")] // Здесь нужна кодировка вместо Dictionary - string, которая зашифрована.!!!!!!!!
-        public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonStrDictionary) 
+        public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary) 
         {
-            /*if (string.IsNullOrWhiteSpace(jsonStrDictionary)) 
-            { 
-                return BadRequest("Dictionary is empty or null on server side"); 
-            }*/
-            return Ok("Instruction Is passed, information added to Database");
+            if (jsonDictionary.IsNullOrEmpty())
+            {
+                return BadRequest("Dictionary is empty or null on server side");
+            }
+            
+            //if (await checkInDB(jsonDictionary))
+            if (true)
+            {
+                return Ok("Instruction Is passed, information added to Database");
+            }
+            else
+            {
+                return NotFound("Instruction was not found in DB!");
+            }
         }
 
-        
+        private async Task<Dictionary<string, object>> CheckInDB(Dictionary<string, object> jsonDictionary)
+        {
+            var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
+            optionsBuilder.UseSqlServer(connectionString);
+
+            string tableName = DBProcessor.tableName_Instructions_sql;
+            string columnName = DBProcessor.tableName_sql_INSTRUCTIONS_cause;
+
+            string sqlQuery = @$"SELECT * FROM [{tableName}] WHERE [{columnName}] = @value";
+            using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
+            {
+                var conn = context.Database.GetDbConnection();
+                await conn.OpenAsync();
+
+                using (var command = conn.CreateCommand())
+                {
+                    command.CommandText = sqlQuery;
+                    DbParameter param = command.CreateParameter();
+                    param.ParameterName = "@value";
+                    param.Value = jsonDictionary[tableName];
+                    command.Parameters.Add(param);
+
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            var result = new Dictionary<string, object>();
+                            for (int i = 0; i < reader.FieldCount; i++)
+                            {
+
+                                result.Add(reader.GetName(i), reader.IsDBNull(i) ? null : reader.GetValue(i));
+                            }
+                            return result;
+                        }
+                        else
+                        {
+                            return null; // Return null if no data is found
+                        }
+                    }
+                }
+            }
+        }
 
         private List<Instruction> getInstructionsByUserInDataBase(string userName)
         {
