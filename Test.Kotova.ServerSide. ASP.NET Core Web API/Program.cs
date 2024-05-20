@@ -8,6 +8,9 @@ using System.Text;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
+using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,9 +20,14 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
     serverOptions.ListenAnyIP(5239); // Set HTTP port
     serverOptions.ListenAnyIP(7052, listenOptions => // Set HTTPS port
     {
-        listenOptions.UseHttps();
+        listenOptions.UseHttps("C:/Users/hifly/Desktop/OpenSSL FireDaemon/certificate.pfx", "Test321!", configureOptions =>
+        {
+            configureOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
+        });
     });
 });
+
+
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -111,6 +119,7 @@ builder.Services.AddAuthorization(options =>
         });
     });
 });
+
 
 builder.Services.AddScoped<LegacyAuthenticationService>();
 builder.Services.AddScoped<NotificationsService>();

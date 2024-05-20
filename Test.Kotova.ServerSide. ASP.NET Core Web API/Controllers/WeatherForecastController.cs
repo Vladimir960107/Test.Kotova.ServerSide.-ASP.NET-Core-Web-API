@@ -22,6 +22,8 @@ using Microsoft.Extensions.Options;
 using System.Data.Common;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Diagnostics.Tracing;
+using System.Text.Json;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -60,16 +62,17 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         [Authorize]
-        [HttpPost("instruction_is_passed_by_user")] // Здесь нужна кодировка вместо Dictionary - string, которая зашифрована.!!!!!!!!
+        [HttpPost("instruction_is_passed_by_user")] // Здесь нужна(или не нужна?) кодировка вместо Dictionary - string, которая зашифрована.!!!!!!!!
         public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary) 
         {
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? tableNameForUser = await _dataService.UserNameToTableName(userName);
+            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
             if (jsonDictionary.IsNullOrEmpty())
             {
                 return BadRequest("Dictionary is empty or null on server side");
             }
-            
-            //if (await checkInDB(jsonDictionary))
-            if (true)
+            if (await passInstructionIntoDb(jsonDictionary, tableNameForUser))
             {
                 return Ok("Instruction Is passed, information added to Database");
             }
@@ -79,7 +82,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<Dictionary<string, object>> CheckInDB(Dictionary<string, object> jsonDictionary)
+        private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser)
         {
             var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
@@ -88,7 +91,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string tableName = DBProcessor.tableName_Instructions_sql;
             string columnName = DBProcessor.tableName_sql_INSTRUCTIONS_cause;
 
+            string instructionIdColumn = DBProcessor.tableName_sql_USER_instruction_id; // The column name for instruction ID in the user table
+            string isPassedColumn = DBProcessor.tableName_sql_USER_is_instruction_passed; // The column name for isPassed in the user table
+
             string sqlQuery = @$"SELECT * FROM [{tableName}] WHERE [{columnName}] = @value";
+            string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
+                    SET [{isPassedColumn}] = 1
+                    WHERE [{instructionIdColumn}] = @instructionId";
+
             using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
@@ -99,34 +109,66 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     command.CommandText = sqlQuery;
                     DbParameter param = command.CreateParameter();
                     param.ParameterName = "@value";
-                    param.Value = jsonDictionary[tableName];
+                    param.Value = jsonDictionary[columnName];
                     command.Parameters.Add(param);
 
                     using (var reader = await command.ExecuteReaderAsync())
                     {
+                        bool isUniqueEntry = false;
                         if (await reader.ReadAsync())
                         {
-                            var result = new Dictionary<string, object>();
-                            for (int i = 0; i < reader.FieldCount; i++)
-                            {
+                            isUniqueEntry = reader.FieldCount == 1;
+                        }
 
-                                result.Add(reader.GetName(i), reader.IsDBNull(i) ? null : reader.GetValue(i));
-                            }
-                            return result;
+                        if (isUniqueEntry)
+                        {
+                            // Close the reader before executing the update query
+                            reader.Close();
+                            command.Parameters.Clear(); // Clear previous parameters
+
+                            // Setting up and executing the update query
+                            command.CommandText = sqlQueryChangePassedVariable;
+                            DbParameter instructionIdParam = command.CreateParameter();
+                            instructionIdParam.ParameterName = "@instructionId";
+                            instructionIdParam.Value = jsonDictionary[DBProcessor.tableName_sql_USER_instruction_id]; // Replace "instructionIdKey" with the actual key from jsonDictionary that corresponds to the instruction ID
+                            command.Parameters.Add(instructionIdParam);
+
+                            int rowsAffected = await command.ExecuteNonQueryAsync();
+                            return rowsAffected > 0;
+                        }
+                        else if (reader.FieldCount > 1)
+                        {
+                            throw new Exception("Instructions with the same cause name were found in multiple quantities!");
                         }
                         else
                         {
-                            return null; // Return null if no data is found
+                            Console.WriteLine("No rows matched the criteria.");
+                            return false;
                         }
                     }
                 }
             }
         }
 
-        private List<Instruction> getInstructionsByUserInDataBase(string userName)
+        private static object ConvertJsonElement(JsonElement element)
         {
-            throw new NotImplementedException(); //НАЧИНАЙ ДЕЛАТЬ!
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.String:
+                    return element.GetString();
+                case JsonValueKind.Number:
+                    return element.GetDecimal(); // Or GetInt32(), GetDouble() depending on your specific data schema
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                    return element.GetBoolean();
+                case JsonValueKind.Undefined:
+                case JsonValueKind.Null:
+                    return DBNull.Value;
+                default:
+                    throw new ArgumentException("Unsupported JSON value kind: " + element.ValueKind);
+            }
         }
+
 
         [HttpPost("upload")] //СДЕЛАТЬ ПРОВЕРКУ ПО РАЗМЕРУ ФАЙЛА EXCEL, по совету ментора
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
@@ -185,7 +227,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     Directory.CreateDirectory(directoryPath);
                 }
 
-                int index = DetermineNextFileIndex(directoryPath);
+                int index = DBProcessor.DetermineNextFileIndex(directoryPath);
 
                 // Construct the new file name
                 string newFileName = $"StandardName_{index}{extensionToLower}";
@@ -210,28 +252,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
-        private int DetermineNextFileIndex(string directoryPath) //Move this function to separate file and import here maybe?
-        {
-            var fileNames = Directory.GetFiles(directoryPath)
-                                     .Select(Path.GetFileNameWithoutExtension)
-                                     .Where(name => name.StartsWith("StandardName_"))
-                                     .Select(name =>
-                                     {
-                                         int idx = name.LastIndexOf('_') + 1;
-                                         return int.TryParse(name[idx..], out int index) ? index : (int?)null;
-                                     })
-                                     .Where(index => index.HasValue)
-                                     .Select(index => index.Value)
-                                     .OrderBy(index => index);
 
-            int nextIndex = 1;
-            if (fileNames.Any())
-            {
-                nextIndex = fileNames.Last() + 1;
-            }
-
-            return nextIndex;
-        }
         [HttpGet("download-newest")]
         public IActionResult DownloadNewestFile()
         {    

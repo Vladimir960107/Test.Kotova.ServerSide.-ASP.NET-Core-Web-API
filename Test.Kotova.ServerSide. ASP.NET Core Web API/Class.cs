@@ -653,7 +653,29 @@ class DBProcessor
             return false;
         }
     }
-        
+    public static int DetermineNextFileIndex(string directoryPath) //Move this function to separate file and import here maybe?
+    {
+        var fileNames = Directory.GetFiles(directoryPath)
+                                 .Select(Path.GetFileNameWithoutExtension)
+                                 .Where(name => name.StartsWith("StandardName_"))
+                                 .Select(name =>
+                                 {
+                                     int idx = name.LastIndexOf('_') + 1;
+                                     return int.TryParse(name[idx..], out int index) ? index : (int?)null;
+                                 })
+                                 .Where(index => index.HasValue)
+                                 .Select(index => index.Value)
+                                 .OrderBy(index => index);
+
+        int nextIndex = 1;
+        if (fileNames.Any())
+        {
+            nextIndex = fileNames.Last() + 1;
+        }
+
+        return nextIndex;
+    }
+
 }
 
 
