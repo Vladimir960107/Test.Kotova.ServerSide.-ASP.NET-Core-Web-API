@@ -165,7 +165,8 @@ class DBProcessor
             END
             ELSE
             BEGIN
-              EXEC('CREATE TABLE [' + '{tableName}' + '] (ID int IDENTITY(1,1) PRIMARY KEY, {tableName_sql_USER_instruction_id} INT,
+              EXEC('CREATE TABLE [' + '{tableName}' + '] (ID int IDENTITY(1,1) PRIMARY KEY, 
+            {tableName_sql_USER_instruction_id} INT UNIQUE,
             {tableName_sql_USER_is_instruction_passed} BIT, 
             {tableName_sql_USER_datePassed} DATETIME,
             {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
