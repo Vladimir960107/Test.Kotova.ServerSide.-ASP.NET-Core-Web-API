@@ -7,6 +7,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
 {
     public class ApplicationDBNotificationContext : DbContext
     {
+        public DbSet<User> Users { get; set; }
         public ApplicationDBNotificationContext(DbContextOptions<ApplicationDBNotificationContext> option)
             : base(option) { }
     }

@@ -466,18 +466,68 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return Unauthorized("Authentication failed.");
             }
         }
-
-        [HttpGet]
-        [Route("notifications")]
+        [HttpPatch]
+        [Route("change_credentials")]
         [Authorize]
-        //[Authorize(Policy = "CanAccessNotifications")] // ITS FOR ADMIN, CHECK Program.cs and rewrite builder.Services.AddAuthorization for use, in case you want admin not to get notifications.
-        public async Task<IActionResult> GetNotifications()
+        public async Task<IActionResult> ChangeCredentials([FromBody] UserCredentials credentials)
         {
-            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            // Retrieve the JWT token from the Authorization header
+            var authorizationHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+            string? jwtToken = authorizationHeader?.StartsWith("Bearer ") == true ? authorizationHeader.Substring("Bearer ".Length).Trim() : null;
+            if (jwtToken == null || jwtToken.Length == 0)
+            {
+                return BadRequest("JWT token is null or empty");
+            }
+            string? user = User.FindFirst(ClaimTypes.Name)?.Value;
+            if (string.IsNullOrWhiteSpace(user))
+            {
+                return BadRequest("user is null or empty");
+            }
+            CredentialValidation credentialValidation = new CredentialValidation();
+            if (credentialValidation.CheckForValidation(credentials, user));
+            {
+                try
+                {
+                    await UpdateCredentialsForUserInDB(credentials, user);
+                    return Ok();
+                }
+                catch
+                {
+                    return BadRequest("Couldn't update the user credentials in DB");
+                }
+            }
 
-            //return Ok(notifications);
-            return Ok();
+            
+        }
+
+        private async Task UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
+            optionsBuilder.UseSqlServer(connectionString);
+
+            using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
+            {
+                // Fetch the user from the database
+                var userToUpdate = await //декюи гдеяэ вепег CHATGPT
+                    .FirstOrDefaultAsync(u => u.Username == user);
+
+                if (userToUpdate != null)
+                {
+                    // Update user details
+                    userToUpdate.Username = credentials.Login; // Assuming you want to change the username to the new login
+                    userToUpdate.PasswordHash = credentials.Password; // This should be a hashed password
+                    userToUpdate.CurrentEmail = credentials.Email;
+
+                    // Save changes to the database
+                    await context.SaveChangesAsync();
+                }
+                else
+                {
+                    // Handle the case where the user is not found
+                    throw new Exception("User not found");
+                }
+            }
         }
 
         [Authorize]
