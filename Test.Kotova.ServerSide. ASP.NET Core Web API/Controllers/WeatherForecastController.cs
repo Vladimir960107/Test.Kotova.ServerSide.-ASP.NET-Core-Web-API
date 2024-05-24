@@ -492,8 +492,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 try
                 {
-                    await UpdateCredentialsForUserInDB(credentials, user);
-                    return Ok();
+                    return await UpdateCredentialsForUserInDB(credentials, user);
                 }
                 catch
                 {
@@ -508,7 +507,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             
         }
 
-        private async Task UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
+
+        private async Task<IActionResult> UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
@@ -516,6 +516,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
             {
+                var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
+                if (newUserExistInDB != null)
+                {
+                    return BadRequest("username is already taken/exist in DB");
+                }
+
                 // Fetch the user from the database
                 var userToUpdate = await context.Users.FirstOrDefaultAsync(u => u.username == user);
 
@@ -528,6 +534,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                     // Save changes to the database
                     await context.SaveChangesAsync();
+                    return Ok();
                 }
                 else
                 {
