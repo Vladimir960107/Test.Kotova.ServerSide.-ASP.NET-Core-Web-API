@@ -34,7 +34,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 Console.WriteLine($"{email} is not valid. old user name - {oldusername}");
                 return false;
             }
-            return true;
+            return true; //Means good response
         }
         private bool ValidateLogin(string login)
         {

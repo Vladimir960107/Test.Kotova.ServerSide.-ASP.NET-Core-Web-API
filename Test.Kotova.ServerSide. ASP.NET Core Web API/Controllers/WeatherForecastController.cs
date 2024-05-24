@@ -24,6 +24,8 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics.Tracing;
 using System.Text.Json;
+using DocumentFormat.OpenXml.InkML;
+using DocumentFormat.OpenXml.Spreadsheet;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -425,10 +427,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
         private readonly IConfiguration _configuration;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration)
+        private readonly ApplicationDbContext _context;
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContext context)
         {
             _legacyAuthService = legacyAuthService;
             _configuration = configuration;
+            _context = context;
         }
 
         [HttpPost("login")]
@@ -484,7 +488,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("user is null or empty");
             }
             CredentialValidation credentialValidation = new CredentialValidation();
-            if (credentialValidation.CheckForValidation(credentials, user));
+            if (credentialValidation.CheckForValidation(credentials, user))
             {
                 try
                 {
@@ -495,6 +499,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return BadRequest("Couldn't update the user credentials in DB");
                 }
+            }
+            else
+            {
+                return BadRequest("checkForValidation returned false");
             }
 
             
@@ -509,15 +517,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
             {
                 // Fetch the user from the database
-                var userToUpdate = await //декюи гдеяэ вепег CHATGPT
-                    .FirstOrDefaultAsync(u => u.Username == user);
+                var userToUpdate = await context.Users.FirstOrDefaultAsync(u => u.username == user);
 
                 if (userToUpdate != null)
                 {
                     // Update user details
-                    userToUpdate.Username = credentials.Login; // Assuming you want to change the username to the new login
-                    userToUpdate.PasswordHash = credentials.Password; // This should be a hashed password
-                    userToUpdate.CurrentEmail = credentials.Email;
+                    userToUpdate.username = credentials.Login; // Assuming you want to change the username to the new login
+                    userToUpdate.password_hash = credentials.Password; // This should be a hashed password
+                    userToUpdate.current_email = credentials.Email;
 
                     // Save changes to the database
                     await context.SaveChangesAsync();
