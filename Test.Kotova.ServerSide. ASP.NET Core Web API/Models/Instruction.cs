@@ -2,7 +2,7 @@
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 {
-    public class NotificationFromDB
+    public class InstructionForUser
     {
         public int instruction_id { get; set; }
         public bool is_instruction_passed { get; set; }

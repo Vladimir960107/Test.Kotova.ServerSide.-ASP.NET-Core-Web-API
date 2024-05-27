@@ -65,7 +65,7 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
-builder.Services.AddDbContext<ApplicationDBNotificationContext>(options =>
+builder.Services.AddDbContext<ApplicationDBInstructionsContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForNotifications")));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

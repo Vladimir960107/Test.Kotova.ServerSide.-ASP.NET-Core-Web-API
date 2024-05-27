@@ -50,7 +50,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         {
 
             var connectionString = _configuration.GetConnectionString("DefaultConnectionForNotifications");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
             // Ensure the tableName is a valid 10-digit number to prevent SQL Injection
@@ -73,7 +73,7 @@ INNER JOIN
 WHERE 
     t.is_instruction_passed = 0"; //DON'T PUT THIS THING INTO ANOTHER FILE BECAUSE OF SECURITY STUFF
             // AND RENAME in SELECT table names into common classes constants!
-            using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
+            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();

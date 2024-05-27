@@ -26,6 +26,7 @@ using System.Diagnostics.Tracing;
 using System.Text.Json;
 using DocumentFormat.OpenXml.InkML;
 using DocumentFormat.OpenXml.Spreadsheet;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -34,11 +35,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     public class InstructionsController : ControllerBase
     {
         private readonly MyDataService _dataService;
+        private readonly ApplicationDBInstructionsContext _context;
 
-        public InstructionsController(MyDataService dataService)
+        public InstructionsController(MyDataService dataService, ApplicationDBInstructionsContext context)
         {
 
             _dataService = dataService;
+            _context = context;
         }
 
         [Authorize]
@@ -97,7 +100,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser)
         {
             var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
             string tableName = DBProcessor.tableName_Instructions_sql;
@@ -112,7 +115,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     SET [{isPassedColumn}] = 1
                     WHERE [{instructionIdColumn}] = @instructionId";
 
-            using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
+            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
@@ -189,7 +192,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         [HttpPost("upload")] //—ƒ≈À¿“‹ œ–Œ¬≈– ” œŒ –¿«Ã≈–” ‘¿…À¿ EXCEL, ÔÓ ÒÓ‚ÂÚÛ ÏÂÌÚÓ‡
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
             if (file == null || file.Length == 0)
@@ -278,7 +281,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("download-newest")]
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public IActionResult DownloadNewestFile()
         {    
             try
@@ -306,7 +309,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("sync-names-with-db")]
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public IActionResult SyncNamesWithDB()
         {
             try
@@ -322,15 +325,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("sync-instructions-with-db")] //Make this load every 1 minute or something.!!!!!
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
-        public IActionResult SyncInstructionsWithDB()
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> SyncInstructionsWithDB()
         {
             try
             {
-                DBProcessor example = new DBProcessor();
-                List<Instruction> instructions = example.GetInstructions(example.GetConnectionString());
-                string serialized = JsonConvert.SerializeObject(instructions);
-                string encryptedData = Encryption_Kotova.EncryptString(serialized);
+                var instructions = await _context.Instructions.ToListAsync();
+                var serialized = JsonConvert.SerializeObject(instructions);
+                var encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
 
             }
@@ -340,7 +342,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
         [HttpPost("send-instruction-and-names")]
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SendInstructionAndNames([FromBody] InstructionPackage package) // ITS FOR SENDING INSTRUCTIONS TO SELECTED PEOPLE? //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
         //public async Task<IActionResult> ReceiveInstructionAndNamesAsync([FromBody] string encryptedData)
         {
@@ -391,7 +393,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("import-into-db")] // IMPORT DATA FROM EXCEL INTO DB
-        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> ImportIntoDBAsync()
         {
             try
@@ -436,10 +438,21 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         [HttpPost("add-new-instruction-into-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] Instruction jsonData)
+        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] Instruction instruction)
         {
-            await Task.Delay(100);
-            return Ok();
+            try
+            {
+                
+                instruction.begin_date = DateTime.UtcNow;
+                _context.Instructions.Add(instruction);
+                await _context.SaveChangesAsync();
+                return Ok(instruction);
+            }
+            catch (Exception ex) 
+            {
+                Console.WriteLine(ex.ToString());
+                return BadRequest("Can't add instruction to DB. Most probably cause of instruction already exist in DB");
+            }
         }
     }
     public class AuthenticationController : ControllerBase
@@ -530,10 +543,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private async Task<IActionResult> UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBNotificationContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
-            using (var context = new ApplicationDBNotificationContext(optionsBuilder.Options))
+            using (var context = new ApplicationDbContext(optionsBuilder.Options))
             {
                 var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
                 if (newUserExistInDB != null)
