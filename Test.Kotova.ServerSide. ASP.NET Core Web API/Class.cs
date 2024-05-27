@@ -27,6 +27,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.Extensions.Configuration;
+using System.Linq.Expressions;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -34,6 +35,9 @@ class DBProcessor
 {
 
     public const double DEVIATION = 0.00001;
+
+    public const double maxFileSizeForExcel = 10 * 1024 * 1024; //Maximum file size (10 MB). PRBLY change it so that it can be changed by writing something into console. like change of data.
+
     public const string tableName_sql_index = "index";
     public const string tableName_sql_names = "names";
     public const string tableName_sql_jobPosition = "job_position";

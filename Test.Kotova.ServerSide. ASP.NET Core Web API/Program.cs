@@ -99,7 +99,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser();
         policy.RequireAssertion(context =>
         {
-            return context.User.IsInRole("Chief Of Department");
+            return context.User.IsInRole("ChiefOfDepartment");
         });
     });
     options.AddPolicy("User", policy =>

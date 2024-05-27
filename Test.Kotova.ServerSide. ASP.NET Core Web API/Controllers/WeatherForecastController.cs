@@ -189,10 +189,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         [HttpPost("upload")] //—ƒ≈À¿“‹ œ–Œ¬≈– ” œŒ –¿«Ã≈–” ‘¿…À¿ EXCEL, ÔÓ ÒÓ‚ÂÚÛ ÏÂÌÚÓ‡
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("Please upload a file.");
+
+            if (file.Length > DBProcessor.maxFileSizeForExcel)
+            {
+                return BadRequest("Uploaded excel file size exceeds limit.");
+            }
 
             // Check the MIME type to see if it's an Excel file 
             string[] permittedMimeTypes = new string[]
@@ -272,6 +278,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("download-newest")]
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
         public IActionResult DownloadNewestFile()
         {    
             try
@@ -299,6 +306,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("sync-names-with-db")]
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
         public IActionResult SyncNamesWithDB()
         {
             try
@@ -314,13 +322,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("sync-instructions-with-db")] //Make this load every 1 minute or something.!!!!!
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
         public IActionResult SyncInstructionsWithDB()
         {
             try
             {
                 DBProcessor example = new DBProcessor();
-                List<Instruction> notifications = example.GetInstructions(example.GetConnectionString());
-                string serialized = JsonConvert.SerializeObject(notifications);
+                List<Instruction> instructions = example.GetInstructions(example.GetConnectionString());
+                string serialized = JsonConvert.SerializeObject(instructions);
                 string encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
 
@@ -331,7 +340,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
         [HttpPost("send-instruction-and-names")]
-        public async Task<IActionResult> ReceiveInstructionAndNames([FromBody] InstructionPackage package) //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> SendInstructionAndNames([FromBody] InstructionPackage package) // ITS FOR SENDING INSTRUCTIONS TO SELECTED PEOPLE? //REWRITE IT IN CASE OF USING ENCRYPTED STUFF(JSON - STRING!)
         //public async Task<IActionResult> ReceiveInstructionAndNamesAsync([FromBody] string encryptedData)
         {
 
@@ -380,7 +390,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedData));
         }
 
-        [HttpGet("import-into-db")]
+        [HttpGet("import-into-db")] // IMPORT DATA FROM EXCEL INTO DB
+        [Authorize(Policy = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> ImportIntoDBAsync()
         {
             try
@@ -421,6 +432,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             return newestFile.FullName;
+        }
+
+        [HttpPost("add-new-instruction-into-db")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] Instruction jsonData)
+        {
+            await Task.Delay(100);
+            return Ok();
         }
     }
     public class AuthenticationController : ControllerBase
@@ -559,7 +578,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             else if (user_role == 2)
             {
-                return "Chief Of Department";
+                return "ChiefOfDepartment";
             }
             else if (user_role == 3)
             {
