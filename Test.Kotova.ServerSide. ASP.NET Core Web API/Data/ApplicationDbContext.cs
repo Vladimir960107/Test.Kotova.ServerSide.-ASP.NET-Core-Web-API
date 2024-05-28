@@ -11,6 +11,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
     {
         public DbSet<User>? Users { get; set; }
 
+        public DbSet<Department> Departments { get; set; }
+
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
             : base(options){ }
 

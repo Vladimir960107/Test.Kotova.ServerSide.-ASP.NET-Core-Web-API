@@ -10,6 +10,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
     public class ApplicationDBInstructionsContext : DbContext
     {
         public DbSet<Instruction> Instructions { get; set; }
+
         public ApplicationDBInstructionsContext(DbContextOptions<ApplicationDBInstructionsContext> option)
             : base(option) {
         }

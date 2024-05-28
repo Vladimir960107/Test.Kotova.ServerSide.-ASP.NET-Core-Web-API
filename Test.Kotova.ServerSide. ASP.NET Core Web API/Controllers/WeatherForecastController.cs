@@ -27,6 +27,7 @@ using System.Text.Json;
 using DocumentFormat.OpenXml.InkML;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.EntityFrameworkCore.Metadata;
+using System.Net;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -36,12 +37,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     {
         private readonly MyDataService _dataService;
         private readonly ApplicationDBInstructionsContext _context;
+        private readonly ApplicationDbContext _second_context;
 
-        public InstructionsController(MyDataService dataService, ApplicationDBInstructionsContext context)
+        public InstructionsController(MyDataService dataService, ApplicationDBInstructionsContext context, ApplicationDbContext second_context)
         {
 
             _dataService = dataService;
             _context = context;
+            _second_context = second_context;
         }
 
         [Authorize]
@@ -454,6 +457,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Can't add instruction to DB. Most probably cause of instruction already exist in DB");
             }
         }
+
+
+        [HttpGet("download-list-of-departments")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> DownloadListOfDepartmentsFromDB()
+        {
+            try
+            {
+                var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                optionsBuilder.UseSqlServer(connectionString);
+
+                using (var context = new ApplicationDbContext(optionsBuilder.Options))
+                {
+                    var departmentNames = await context.Departments
+                                                  .Select(dept => dept.department_name)
+                                                  .ToListAsync();
+
+                    return Ok(departmentNames);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log the error details here for debugging purposes
+                return StatusCode(500, "Internal Server Error: Could not retrieve departments.");
+            }
+        }   
     }
     public class AuthenticationController : ControllerBase
     {
