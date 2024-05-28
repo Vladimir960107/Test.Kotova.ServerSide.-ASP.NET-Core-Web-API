@@ -9,6 +9,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
         public int user_role { get; set; }
         public string? current_personnel_number { get; set; }
         public string? current_email { get; set; }
+        public string department { get; set; }
+        public string? desk_number { get; set; }
     }
     public class UserForAuthentication //ITS FOR AUTHENTICATION FROM BODY
     {
