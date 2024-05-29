@@ -28,6 +28,7 @@ using DocumentFormat.OpenXml.InkML;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.EntityFrameworkCore.Metadata;
 using System.Net;
+using Microsoft.Data.SqlClient;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -483,8 +484,89 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 // Log the error details here for debugging purposes
                 return StatusCode(500, "Internal Server Error: Could not retrieve departments.");
             }
-        }   
-    }
+        }
+
+        [HttpPost("insert-new-employee")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> InsertNewcomerIntoDb([FromBody] Employee newcomer)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
+            string? connectionString = null;
+            switch (newcomer.department)
+            {
+                case "Общестроительный отдел":
+                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
+                    break;
+                case "Технический отдел":
+                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                    break;
+            }
+
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                return BadRequest("Invalid department");
+            }
+
+            optionsBuilder.UseSqlServer(connectionString);
+
+            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
+            {
+                bool employeeExists = await context.Department_employees
+                    .AnyAsync(e => e.personnel_number == newcomer.personnel_number);
+                bool tablePNExists = await DoesTableExistAsync(context, newcomer.personnel_number);
+
+                if (employeeExists)
+                {
+                    return BadRequest("An employee with the same PersonnelNumber already exists.");
+                }
+                if (tablePNExists)
+                {
+                    return BadRequest("A table with the same PersonnelNumber already exists.");
+                }
+
+                try
+                {
+                    await DBProcessor.CreateTableDIAsync(newcomer.personnel_number, connectionString);
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest($"A table with new personnel number can't be created: {ex.Message}");
+                }
+
+                context.Department_employees.Add(newcomer);
+                int rowsAffected = await context.SaveChangesAsync();
+
+                if (rowsAffected > 0)
+                {
+                    return Ok("Employee inserted into DB");
+                }
+                return BadRequest("Something went wrong, employee not inserted. Check InsertNewcomerIntoDb.");
+            }
+        }
+        private async Task<bool> DoesTableExistAsync(ApplicationDBInstructionsContext context, string personnelNumber) //Don't work!
+        {
+            var tableName = $"dbo.{personnelNumber}";
+
+            var sqlQuery = "SELECT CASE WHEN EXISTS (" +
+                           "SELECT * FROM INFORMATION_SCHEMA.TABLES " +
+                           "WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tableName) " +
+                           "THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END";
+
+            var parameter = new SqlParameter("@tableName", personnelNumber);
+
+            bool exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter) == 1;
+            return exists;
+        }
+    }   
+
+
+
+
     public class AuthenticationController : ControllerBase
     {
         private readonly LegacyAuthenticationService _legacyAuthService;

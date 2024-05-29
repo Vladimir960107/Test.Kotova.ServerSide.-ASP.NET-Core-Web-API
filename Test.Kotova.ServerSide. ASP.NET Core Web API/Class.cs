@@ -28,6 +28,8 @@ using Microsoft.EntityFrameworkCore;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Microsoft.Extensions.Configuration;
 using System.Linq.Expressions;
+using Microsoft.AspNetCore.Mvc;
+using System.Data.Common;
 
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
@@ -39,7 +41,7 @@ class DBProcessor
     public const double maxFileSizeForExcel = 10 * 1024 * 1024; //Maximum file size (10 MB). PRBLY change it so that it can be changed by writing something into console. like change of data.
 
     public const string tableName_sql_index = "index";
-    public const string tableName_sql_names = "names";
+    public const string tableName_sql_names = "full_name";
     public const string tableName_sql_jobPosition = "job_position";
     public const string tableName_sql_isDriver = "is_driver";
     public const string tableName_sql_BirthDate = "birth_date";
@@ -48,7 +50,7 @@ class DBProcessor
     public const string tableName_sql_department = "department";
     public const string tableName_sql_group = "group";
 
-    public const string tableName_sql_MainName = "dbo.TableTest";
+    public const string tableName_sql_MainName = "dbo.Department_employees";
     public const string tableName_Instructions_sql = "dbo.Instructions";
     public const string connectionString_server = "localhost";
     public const string connectionString_database = "TestDB";
@@ -151,7 +153,7 @@ class DBProcessor
         }
     }
 
-    public async Task CreateTableAsync(string tableName)
+    public async Task CreateTableAsync(string tableName) //DOES IT STILL WORK?
     {
         if (string.IsNullOrWhiteSpace(tableName))
         {
@@ -181,7 +183,6 @@ class DBProcessor
         using (SqlConnection conn = new SqlConnection(GetConnectionString()))
         {
             SqlCommand cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@tableName", tableName);
             await conn.OpenAsync();
             using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
             {
@@ -191,6 +192,51 @@ class DBProcessor
                 }
                 reader.Close();
             }
+        }
+    }
+
+    public static async Task CreateTableDIAsync(string tableName,string _dbConnection)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(tableName))
+            {
+                throw new ArgumentException("Table name is null or empty");
+            }
+
+            if (!Regex.IsMatch(tableName, @"^[0-9]+$"))
+            {
+                throw new ArgumentException("Table name must be numeric.");
+            }
+
+            string sql = @$"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName)
+            BEGIN
+                EXEC('CREATE TABLE [' + @tableName + '] (
+                    ID int IDENTITY(1,1) PRIMARY KEY, 
+                    {tableName_sql_USER_instruction_id} INT UNIQUE,
+                    {tableName_sql_USER_is_instruction_passed} BIT, 
+                    {tableName_sql_USER_datePassed} DATETIME,
+                    {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
+                    {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME
+                )')
+            END"
+            ;
+
+            using (SqlConnection conn = new SqlConnection(_dbConnection))
+            {
+                await conn.OpenAsync();
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@tableName", tableName);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log the exception or handle it as necessary
+            throw new Exception("An error occurred while creating the table.", ex);
         }
     }
 
@@ -680,6 +726,8 @@ class DBProcessor
 
         return nextIndex;
     }
+
+
 
 
 }

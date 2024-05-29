@@ -67,6 +67,8 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
 builder.Services.AddDbContext<ApplicationDBInstructionsContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForNotifications")));
+builder.Services.AddDbContext<ApplicationDBInstructionsContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
