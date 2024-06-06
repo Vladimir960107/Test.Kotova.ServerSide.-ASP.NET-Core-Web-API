@@ -29,6 +29,8 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.EntityFrameworkCore.Metadata;
 using System.Net;
 using Microsoft.Data.SqlClient;
+using DocumentFormat.OpenXml.Bibliography;
+using System.Data;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -561,6 +563,83 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             bool exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter) == 1;
             return exists;
+        }
+        [HttpPost("get_login_password")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] User usertemp)
+        {
+            UserTemp newUser = new UserTemp(usertemp.current_personnel_number, usertemp.department_id, usertemp.desk_number);
+            try
+            {
+                var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
+                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
+
+                using (var context = new ApplicationDbContext(temporaryOptionsBuilder.Options))
+                {
+                    var conn = context.Database.GetDbConnection();
+                    await conn.OpenAsync();
+                    using (var command = conn.CreateCommand())
+                    {
+                        command.CommandText = "INSERT INTO dbo.users (username, password_hash, user_role, current_personnel_number, department_id, desk_number) " +
+                                              "VALUES (@username, @password_hash, @user_role, @current_personnel_number, @department_id, @desk_number)";
+
+                        command.Parameters.Add(new SqlParameter("@username", SqlDbType.VarChar) { Value = newUser.Login });
+                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.Password }); // In a real application, hash the password
+                        command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = 1 });
+                        command.Parameters.Add(new SqlParameter("@current_personnel_number", SqlDbType.VarChar) { Value = newUser.PersonnelNumber });
+                        command.Parameters.Add(new SqlParameter("@department_id", SqlDbType.Int) { Value = newUser.DepartmentId });
+                        command.Parameters.Add(new SqlParameter("@desk_number", SqlDbType.Int) { Value = newUser.DeskNumber });
+
+                        int result = await command.ExecuteNonQueryAsync();
+
+                        if (result > 0)
+                        {
+                            string serialized = JsonConvert.SerializeObject((newUser.Login, newUser.Password));
+                            return Ok(serialized);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error inserting user.");
+                            return BadRequest($"Coudn't insert user:{newUser.Login} into database");
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return BadRequest("something went wrong while inserting user");
+            }
+        }
+
+        public class UserTemp
+        {
+            public string PersonnelNumber { get; set; }
+            public string Login { get; set; }
+            public string Password { get; set; }
+            public int? DepartmentId { get; set; }
+            public string? DeskNumber { get; set; }
+
+            public UserTemp(string personnelNumber, int departmentId, string deskNumber)
+            {
+                PersonnelNumber = personnelNumber;
+                DepartmentId = departmentId;
+                DeskNumber = deskNumber;
+                GenerateLoginAndPassword();
+            }
+
+            private void GenerateLoginAndPassword()
+            {
+                Random random = new Random();
+                int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number
+                Login = $"User{randomNumber}";
+                Password = Login;
+            }
+
+            public override string ToString()
+            {
+                return $"Personnel Number: {PersonnelNumber}, Login: {Login}, Password: {Password}";
+            }
         }
     }   
 
