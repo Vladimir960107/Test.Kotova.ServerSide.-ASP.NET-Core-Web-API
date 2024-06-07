@@ -105,7 +105,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser)
         {
-            var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
+            var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
@@ -502,7 +502,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             switch (newcomer.department)
             {
                 case "Общестроительный отдел":
-                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForNotifications");
+                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
                     break;
                 case "Технический отдел":
                     connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
@@ -566,9 +566,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         [HttpPost("get_login_password")]
         [Authorize(Roles = "Coordinator, Administrator")]
-        public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] User usertemp)
+        public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] Tuple<string,string,string> someInfoAboutNewUser)
         {
-            UserTemp newUser = new UserTemp(usertemp.current_personnel_number, usertemp.department_id, usertemp.desk_number);
+            UserTemp newUser = new UserTemp(someInfoAboutNewUser.Item1, someInfoAboutNewUser.Item2, someInfoAboutNewUser.Item3);
             try
             {
                 var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
@@ -595,7 +595,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                         if (result > 0)
                         {
-                            string serialized = JsonConvert.SerializeObject((newUser.Login, newUser.Password));
+                            var whatever = new Tuple<string, string>(newUser.Login, newUser.Password);
+
+                            string serialized = JsonConvert.SerializeObject(whatever);
+                            _ = FindNewEmployeeAndCreateInitialInstruction(newUser.PersonnelNumber, newUser.DepartmentId);
                             return Ok(serialized);
                         }
                         else
@@ -612,6 +615,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        private object FindNewEmployeeAndCreateInitialInstruction(string personnelNumber, int? departmentId)
+        {
+            if (departmentId == -1)
+            {
+                //Отправь уведомление клиенту что, не найден человек с таким отделом.
+                Console.WriteLine("Не найден отдел! проверь FindNewEmployeeAndCreateInitialInstruction");
+                return null;
+            }
+
+            string? connectionString = null;
+            switch (departmentId)
+            {
+                case 1: //Общестроительный отдел
+                    connectionString = "DefaultConnectionForGeneralConstructionDepartment";
+                    break;
+                case 2: //Техничесский отдел
+                    connectionString = "DefaultConnectionForTechnicalDepartment";
+                    break;
+                default:
+                    Console.WriteLine("Что за отдел? Непонятно. Проверь функцию FindNewEmployeeAndCreateInitialInstruction");
+                    return null;
+            }
+            return null; //Продолжить!
+
+        }
+
+        
+
         public class UserTemp
         {
             public string PersonnelNumber { get; set; }
@@ -620,20 +651,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             public int? DepartmentId { get; set; }
             public string? DeskNumber { get; set; }
 
-            public UserTemp(string personnelNumber, int departmentId, string deskNumber)
+            public UserTemp(string personnelNumber, string departmentName, string deskNumber)
             {
                 PersonnelNumber = personnelNumber;
-                DepartmentId = departmentId;
+                DepartmentId = departmentNameToId(departmentName);
                 DeskNumber = deskNumber;
-                GenerateLoginAndPassword();
-            }
 
-            private void GenerateLoginAndPassword()
-            {
                 Random random = new Random();
                 int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number
                 Login = $"User{randomNumber}";
                 Password = Login;
+            }
+
+            private int departmentNameToId(string departmentName) // Можешь переделать чтобы брались данные из таблицы с id и именами отдела
+            {
+                switch (departmentName)
+                {
+                    case "Общестроительный отдел":
+                        return 1;
+                    case "Технический отдел":
+                        return 2;
+                    default:
+                        return -1;
+                }
             }
 
             public override string ToString()

@@ -49,7 +49,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         public async Task<List<Dictionary<string, object>>> ReadDataFromDynamicTable(string tableName)
         {
 
-            var connectionString = _configuration.GetConnectionString("DefaultConnectionForNotifications");
+            var connectionString = _configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
