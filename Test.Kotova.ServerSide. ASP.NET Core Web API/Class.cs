@@ -38,7 +38,7 @@ class DBProcessor
 
     public const double DEVIATION = 0.00001;
 
-    public const double maxFileSizeForExcel = 10 * 1024 * 1024; //Maximum file size (10 MB). PRBLY change it so that it can be changed by writing something into console. like change of data.
+    public const double maxFileSizeForExcel = 10 * 1024 * 1024; //Maximum file excel size (10 MB).
 
     public const string tableName_sql_index = "index";
     public const string tableName_sql_names = "full_name";
@@ -235,7 +235,6 @@ class DBProcessor
         }
         catch (Exception ex)
         {
-            // Log the exception or handle it as necessary
             throw new Exception("An error occurred while creating the table.", ex);
         }
     }
@@ -251,17 +250,16 @@ class DBProcessor
         public string? PersonnelNumber { get; set; }
         public string? Department { get; set; }
         public string? Group { get; set; }
-        // Add other properties as needed...
     }
 
     public List<Tuple<string, string>> GetNames(string connectionString)
     {
-        List<Tuple<string, string>> names = new List<Tuple<string, string>>(); // Prepare a list to store the retrieved names
+        List<Tuple<string, string>> names = new List<Tuple<string, string>>();
 
         using (var connection = new SqlConnection(connectionString))
         {
             connection.Open(); // Open the database connection
-            var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql_MainName}"; // SQL query to retrieve names
+            var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql_MainName}";
 
             using (var command = new SqlCommand(query, connection))
             {
@@ -269,7 +267,7 @@ class DBProcessor
                 {
                     while (reader.Read()) // Read each row returned by the query
                     {
-                        var name = reader[tableName_sql_names] as string; // Safely cast to string, which will be null if the value is DBNull
+                        var name = reader[tableName_sql_names] as string; 
                         if (reader[tableName_sql_BirthDate] != DBNull.Value)
                         {
                             DateTime? birthDate = (DateTime?)reader[tableName_sql_BirthDate]; // Correct casting of DateTime
@@ -505,8 +503,6 @@ class DBProcessor
 
                 columnsPart.Append($"[{mapping.Key}]");
                 parametersPart.Append($"@{mapping.Key}"); // Use the column name as the parameter name
-
-                // Add the parameter to the command
                 command.Parameters.AddWithValue($"@{mapping.Key}", mapping.Value);
             }
 
@@ -608,7 +604,6 @@ class DBProcessor
                 {
                     instructionId = reader.GetInt32(0);
                 }
-                reader.Close(); // Explicitly close the reader if not using 'using' statement
             }
         }
         return instructionId;
@@ -699,7 +694,6 @@ class DBProcessor
         }
         catch (Exception ex)
         {
-            // Log error and rollback transaction if something goes wrong
             Console.WriteLine($"An error occurred: {ex.Message}");
             return false;
         }

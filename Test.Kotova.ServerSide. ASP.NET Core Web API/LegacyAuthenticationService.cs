@@ -28,11 +28,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _context = context;
         }
 
-        public async Task<(bool?, User?)> PerformLogin(string username, string password)
+        public async Task<(bool?, User?)> PerformLogin(User userTemp, string plainPassword)
         {
+
+            bool isPasswordValid = BCrypt.Net.BCrypt.Verify(plainPassword, userTemp.password_hash);
+            Console.WriteLine(plainPassword);
+            Console.WriteLine(userTemp.password_hash);
             // Check username and password
-            (bool?,User?) isAuthenticated = await SimpleAuthenticationUserAsync(username, password);
-            if (isAuthenticated.Item2 is not null && isAuthenticated.Item2.current_email is not null)
+
+            if (!isPasswordValid)
+            {
+                return (false, null); // Password did not match
+            }
+
+            if (userTemp.current_email is not null)
             {
                 /*
                 // Generate 2FA code
@@ -42,23 +51,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 // Send the code via email
                 await SendTwoFactorCodeEmail(username, twoFactorCode); //THIS ALL CODE IS FOR 2-FACTOR AUTHENTICATION
                 IF AUTHENTICATED - 
-                return (true, isAuthenticated.Item2);
+                return (true, userTemp);
                 IF NOT AUTHENTICATED -
-                return (false, isAuthenticated.Item2);
+                return (false, userTemp);
                 */
                 // IN CASE HE IS NOT AUTHENTICATED - CODE AT THE TOP THAT IS COMMENTED SHOULD RETURN FALSE AND STUFF!
             }
-            else if (isAuthenticated.Item2 is not null && isAuthenticated.Item2.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
+            else if (userTemp.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
             {
                 //return something
                 //CHECK BY NUMBER OR JUST FORGET ABOUT IT ¯\_(ツ)_/¯
-                return isAuthenticated; //gonna return (true, User)
+                return (true,userTemp); //gonna return (true, User)
             }
-            else if (isAuthenticated.Item1 is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
+            else if (userTemp.current_personnel_number is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
             {
-                return isAuthenticated; // gonna return (null,User)
+                return (null, userTemp); // gonna return (null,User)
             }
-            return isAuthenticated; // gonna return (false, User)
+            return (false, userTemp); // gonna return (false, User)
         }
 
         

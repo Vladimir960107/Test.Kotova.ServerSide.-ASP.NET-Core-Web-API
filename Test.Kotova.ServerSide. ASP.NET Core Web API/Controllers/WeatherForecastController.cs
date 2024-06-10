@@ -585,7 +585,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                               "VALUES (@username, @password_hash, @user_role, @current_personnel_number, @department_id, @desk_number)";
 
                         command.Parameters.Add(new SqlParameter("@username", SqlDbType.VarChar) { Value = newUser.Login });
-                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.Password }); // In a real application, hash the password
+                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.HashedPassword }); // In a real application, hash the password
                         command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = 1 });
                         command.Parameters.Add(new SqlParameter("@current_personnel_number", SqlDbType.VarChar) { Value = newUser.PersonnelNumber });
                         command.Parameters.Add(new SqlParameter("@department_id", SqlDbType.Int) { Value = newUser.DepartmentId });
@@ -619,7 +619,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             if (departmentId == -1)
             {
-                //Отправь уведомление клиенту что, не найден человек с таким отделом.
                 Console.WriteLine("Не найден отдел! проверь FindNewEmployeeAndCreateInitialInstruction");
                 return null;
             }
@@ -648,6 +647,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             public string PersonnelNumber { get; set; }
             public string Login { get; set; }
             public string Password { get; set; }
+            public string HashedPassword { get; set; }
             public int? DepartmentId { get; set; }
             public string? DeskNumber { get; set; }
 
@@ -658,9 +658,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 DeskNumber = deskNumber;
 
                 Random random = new Random();
-                int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number
+                int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number for User
                 Login = $"User{randomNumber}";
                 Password = Login;
+                HashedPassword = Encryption_Kotova.HashPassword(Password);
             }
 
             private int departmentNameToId(string departmentName) // Можешь переделать чтобы брались данные из таблицы с id и именами отдела
@@ -701,7 +702,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
-            (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(model.username, model.password);
+            User userTemp = await GetUserByUsername(model.username);
+
+            if (userTemp == null)
+            {
+                return BadRequest($"user under name {model.username} wasn't found");
+            }
+
+            (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
             {
                 try
@@ -733,6 +741,47 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return Unauthorized("Authentication failed.");
             }
         }
+
+        private async Task<User> GetUserByUsername(string username)
+        {
+            User user = null;
+
+            string query = "SELECT * FROM Users WHERE Username = @Username";
+
+            string _connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
+
+            using (SqlConnection connection = new SqlConnection(_connectionString))
+            {
+                await connection.OpenAsync();
+
+                using (SqlCommand command = new SqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@Username", username);
+
+                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            user = new User
+                            {
+                                username = reader["username"].ToString(),
+                                password_hash = reader["password_hash"].ToString(),
+                                user_role = reader.GetInt32(reader.GetOrdinal("user_role")),
+                                current_personnel_number = reader["current_personnel_number"].ToString(),
+                                current_email = reader["current_email"].ToString(),
+                                department_id = reader.GetInt32(reader.GetOrdinal("department_id")),
+                                desk_number = reader["desk_number"].ToString(),
+                                // Initialize other properties as needed
+                            };
+                        }
+                    }
+                }
+            }
+
+            return user;
+        }
+
+
         [HttpPatch]
         [Route("change_credentials")]
         [Authorize]
@@ -791,17 +840,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 if (userToUpdate != null)
                 {
                     // Update user details
-                    userToUpdate.username = credentials.Login; // Assuming you want to change the username to the new login
+                    userToUpdate.username = credentials.Login;
                     userToUpdate.password_hash = credentials.Password; // This should be a hashed password
                     userToUpdate.current_email = credentials.Email;
 
-                    // Save changes to the database
                     await context.SaveChangesAsync();
                     return Ok();
                 }
                 else
                 {
-                    // Handle the case where the user is not found
                     throw new Exception("User not found");
                 }
             }

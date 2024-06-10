@@ -53,8 +53,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
             optionsBuilder.UseSqlServer(connectionString);
 
-            // Ensure the tableName is a valid 10-digit number to prevent SQL Injection
-            if (!Regex.IsMatch(tableName, @"^\d{10}$"))
+            
+            if (!Regex.IsMatch(tableName, @"^\d{10}$")) // Ensure the tableName is a valid 10-digit number
             {
                 throw new ArgumentException("Invalid table name");
             }
