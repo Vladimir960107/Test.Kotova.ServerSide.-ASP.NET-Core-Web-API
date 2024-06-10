@@ -56,14 +56,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 return (false, userTemp);
                 */
                 // IN CASE HE IS NOT AUTHENTICATED - CODE AT THE TOP THAT IS COMMENTED SHOULD RETURN FALSE AND STUFF!
+                return (true, userTemp);
             }
-            else if (userTemp.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
+            if (userTemp.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
             {
                 //return something
                 //CHECK BY NUMBER OR JUST FORGET ABOUT IT ¯\_(ツ)_/¯
                 return (true,userTemp); //gonna return (true, User)
             }
-            else if (userTemp.current_personnel_number is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
+            if (userTemp.current_personnel_number is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
             {
                 return (null, userTemp); // gonna return (null,User)
             }

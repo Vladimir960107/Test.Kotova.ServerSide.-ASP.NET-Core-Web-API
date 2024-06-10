@@ -585,7 +585,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                               "VALUES (@username, @password_hash, @user_role, @current_personnel_number, @department_id, @desk_number)";
 
                         command.Parameters.Add(new SqlParameter("@username", SqlDbType.VarChar) { Value = newUser.Login });
-                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.HashedPassword }); // In a real application, hash the password
+                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.HashedPassword }); 
                         command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = 1 });
                         command.Parameters.Add(new SqlParameter("@current_personnel_number", SqlDbType.VarChar) { Value = newUser.PersonnelNumber });
                         command.Parameters.Add(new SqlParameter("@department_id", SqlDbType.Int) { Value = newUser.DepartmentId });
