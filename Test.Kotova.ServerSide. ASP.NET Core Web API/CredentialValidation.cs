@@ -29,7 +29,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 Console.WriteLine($"{password} is not valid. old user name - {oldusername}");
                 return false;
             }
-            else if (string.IsNullOrWhiteSpace(email) || (!ValidateEmail(email)))
+            else if (!ValidateEmail(email))
             {
                 Console.WriteLine($"{email} is not valid. old user name - {oldusername}");
                 return false;
@@ -51,7 +51,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             return password == repeatedPassword;
         }
 
-        private bool ValidateEmail(string email)
+        private bool ValidateEmail(string? email)
         {
             return string.IsNullOrEmpty(email) || Regex.IsMatch(email, EmailRegex);
         }

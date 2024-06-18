@@ -39,15 +39,17 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     public class InstructionsController : ControllerBase
     {
         private readonly MyDataService _dataService;
-        private readonly ApplicationDBInstructionsContext _context;
-        private readonly ApplicationDbContext _second_context;
+        private readonly ApplicationDBContextGeneralConstr _contextGeneralConstr;
+        private readonly ApplicationDbContextUsers _userContext;
+        private readonly ApplicationDBContextTechnicalDepartment _contextTechnicalDepartment;
 
-        public InstructionsController(MyDataService dataService, ApplicationDBInstructionsContext context, ApplicationDbContext second_context)
+        public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment)
         {
 
             _dataService = dataService;
-            _context = context;
-            _second_context = second_context;
+            _contextGeneralConstr = contextGeneralConstr;
+            _userContext = userContext;
+            _contextTechnicalDepartment = contextTechnicalDepartment;
         }
 
         [Authorize]
@@ -64,8 +66,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
-            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
-            List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser);
+            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
+            int? departmentId = await _dataService.GetDepartmentIdToTableName(userName);
+            if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
+            List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
             string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
             return Ok(encryptedData);
@@ -106,7 +110,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser)
         {
             var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
             optionsBuilder.UseSqlServer(connectionString);
 
             string tableName = DBProcessor.tableName_Instructions_sql;
@@ -121,7 +125,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     SET [{isPassedColumn}] = 1
                     WHERE [{instructionIdColumn}] = @instructionId";
 
-            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
+            using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
@@ -336,7 +340,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                var instructions = await _context.Instructions.ToListAsync();
+                var instructions = await _contextGeneralConstr.Instructions.ToListAsync();
                 var serialized = JsonConvert.SerializeObject(instructions);
                 var encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
@@ -450,8 +454,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 
                 instruction.begin_date = DateTime.UtcNow;
-                _context.Instructions.Add(instruction);
-                await _context.SaveChangesAsync();
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim of Chief not found.");
+                }
+                int departmentId = await GetDepartmentIdFromChiefUserName(username);
+                switch (departmentId)
+                {
+                    case 1:
+                        _contextGeneralConstr.Instructions.Add(instruction);
+                        await _contextGeneralConstr.SaveChangesAsync();
+                        break;
+                    case 2:
+                        _contextTechnicalDepartment.Instructions.Add(instruction);
+                        await _contextTechnicalDepartment.SaveChangesAsync();
+                        break;
+                    case -1:
+                    default:
+                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                }    
                 return Ok(instruction);
             }
             catch (Exception ex) 
@@ -461,6 +483,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        private async Task<int> GetDepartmentIdFromChiefUserName(string username)
+        {
+            var user = await _userContext.Users
+            .Where(u => u.username == username)
+            .Select(u => new { u.department_id })
+            .FirstOrDefaultAsync();
+            if (user == null)
+            {
+                return -1;
+            }
+            return user.department_id;
+        }
 
         [HttpGet("download-list-of-departments")]
         [Authorize(Roles = "Coordinator, Administrator")]
@@ -469,10 +503,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
                 optionsBuilder.UseSqlServer(connectionString);
 
-                using (var context = new ApplicationDbContext(optionsBuilder.Options))
+                using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
                 {
                     var departmentNames = await context.Departments
                                                   .Select(dept => dept.department_name)
@@ -488,6 +522,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        [HttpGet("get-roles-for-newcomer")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> DownloadListOfRolesFromDB()
+        {
+            try
+            {
+                var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
+                optionsBuilder.UseSqlServer(connectionString);
+
+                using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
+                {
+                    var roleTypes = await context.Roles
+                                                  .Select(role => role.roletype)
+                                                  .ToListAsync();
+
+                    return Ok(roleTypes);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log the error details here for debugging purposes
+                return StatusCode(500, "Internal Server Error: Could not retrieve departments.");
+            }
+        }
+
+
         [HttpPost("insert-new-employee")]
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> InsertNewcomerIntoDb([FromBody] Employee newcomer)
@@ -497,7 +558,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest(ModelState);
             }
 
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
             string? connectionString = null;
             switch (newcomer.department)
             {
@@ -516,7 +577,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             optionsBuilder.UseSqlServer(connectionString);
 
-            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
+            using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
             {
                 bool employeeExists = await context.Department_employees
                     .AnyAsync(e => e.personnel_number == newcomer.personnel_number);
@@ -550,7 +611,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Something went wrong, employee not inserted. Check InsertNewcomerIntoDb.");
             }
         }
-        private async Task<bool> DoesTableExistAsync(ApplicationDBInstructionsContext context, string personnelNumber) //Don't work!
+        private async Task<bool> DoesTableExistAsync(ApplicationDBContextGeneralConstr context, string personnelNumber) //Don't work!
         {
             var tableName = $"dbo.{personnelNumber}";
 
@@ -564,18 +625,21 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             bool exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter) == 1;
             return exists;
         }
-        [HttpPost("get_login_password")]
+        [HttpPost("get-login-and-password-for-newcommer")]
         [Authorize(Roles = "Coordinator, Administrator")]
-        public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] Tuple<string,string,string> someInfoAboutNewUser)
+        public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] List<string> someInfoAboutNewUser)
         {
-            UserTemp newUser = new UserTemp(someInfoAboutNewUser.Item1, someInfoAboutNewUser.Item2, someInfoAboutNewUser.Item3);
+            UserTemp newUser = new UserTemp(someInfoAboutNewUser[0], someInfoAboutNewUser[1], someInfoAboutNewUser[2], someInfoAboutNewUser[3], _dataService);
+
             try
             {
+                if (newUser.UserRoleIndex is null) { return BadRequest($"userRole {someInfoAboutNewUser[3]} is invalid to be put into Database, returning null"); }
+
                 var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
                 temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
 
-                using (var context = new ApplicationDbContext(temporaryOptionsBuilder.Options))
+                using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
                 {
                     var conn = context.Database.GetDbConnection();
                     await conn.OpenAsync();
@@ -586,7 +650,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                         command.Parameters.Add(new SqlParameter("@username", SqlDbType.VarChar) { Value = newUser.Login });
                         command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.HashedPassword }); 
-                        command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = 1 });
+                        command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = newUser.UserRoleIndex });
                         command.Parameters.Add(new SqlParameter("@current_personnel_number", SqlDbType.VarChar) { Value = newUser.PersonnelNumber });
                         command.Parameters.Add(new SqlParameter("@department_id", SqlDbType.Int) { Value = newUser.DepartmentId });
                         command.Parameters.Add(new SqlParameter("@desk_number", SqlDbType.Int) { Value = newUser.DeskNumber });
@@ -644,14 +708,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         public class UserTemp
         {
+            private readonly MyDataService _dataService;
             public string PersonnelNumber { get; set; }
             public string Login { get; set; }
             public string Password { get; set; }
             public string HashedPassword { get; set; }
             public int? DepartmentId { get; set; }
             public string? DeskNumber { get; set; }
+            public int? UserRoleIndex { get; set; }
 
-            public UserTemp(string personnelNumber, string departmentName, string deskNumber)
+            public UserTemp(string personnelNumber, string departmentName, string deskNumber, string userRole, MyDataService dataService)
             {
                 PersonnelNumber = personnelNumber;
                 DepartmentId = departmentNameToId(departmentName);
@@ -662,6 +728,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 Login = $"User{randomNumber}";
                 Password = Login;
                 HashedPassword = Encryption_Kotova.HashPassword(Password);
+                UserRoleIndex = IndexFromUserRole(userRole);
+                _dataService = dataService;
+            }
+
+            private int? IndexFromUserRole(string userRole)
+            {
+                var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
+                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
+                temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
+
+                using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
+                { 
+
+                    var roleId = context.Roles
+                                          .Where(r => r.roletype == userRole)
+                                          .Select(r => r.roleid)
+                                          .FirstOrDefault();
+
+                    List<string> validRoles = new List<string> { "user", "chief of department", "management"};
+                    if (validRoles.Contains(userRole))
+                    {
+                        return roleId;
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
             }
 
             private int departmentNameToId(string departmentName) // Можешь переделать чтобы брались данные из таблицы с id и именами отдела
@@ -691,8 +785,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
         private readonly IConfiguration _configuration;
-        private readonly ApplicationDbContext _context;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContext context)
+        private readonly ApplicationDbContextUsers _context;
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context)
         {
             _legacyAuthService = legacyAuthService;
             _configuration = configuration;
@@ -823,10 +917,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private async Task<IActionResult> UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
         {
             var connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
             optionsBuilder.UseSqlServer(connectionString);
 
-            using (var context = new ApplicationDbContext(optionsBuilder.Options))
+            using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
             {
                 var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
                 if (newUserExistInDB != null)
@@ -841,7 +935,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     // Update user details
                     userToUpdate.username = credentials.Login;
-                    userToUpdate.password_hash = credentials.Password; // This should be a hashed password
+                    userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
                     userToUpdate.current_email = credentials.Email;
 
                     await context.SaveChangesAsync();
@@ -876,6 +970,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return "Coordinator";
             }
             else if (user_role == 4)
+            {
+                return "Management";
+            }
+            else if (user_role == 5)
             {
                 return "Administrator";
             }

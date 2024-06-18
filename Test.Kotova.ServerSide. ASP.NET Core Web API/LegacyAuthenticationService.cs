@@ -15,7 +15,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
     {
         //private readonly HttpClient _httpClient;
 
-        private readonly ApplicationDbContext _context;
+        private readonly ApplicationDbContextUsers _context;
 
         /*
         public LegacyAuthenticationService(HttpClient httpClient)
@@ -23,7 +23,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _httpClient = httpClient;
         }
         */
-        public LegacyAuthenticationService(ApplicationDbContext context)
+        public LegacyAuthenticationService(ApplicationDbContextUsers context)
         {
             _context = context;
         }
@@ -32,13 +32,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
         {
 
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(plainPassword, userTemp.password_hash);
-            Console.WriteLine(plainPassword);
-            Console.WriteLine(userTemp.password_hash);
-            // Check username and password
 
             if (!isPasswordValid)
             {
-                return (false, null); // Password did not match
+                return (false, null);
             }
 
             if (userTemp.current_email is not null)

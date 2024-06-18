@@ -4,7 +4,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
 {
     public class NotificationsService
     {
-        private readonly ApplicationDBInstructionsContext _context;
+        private readonly ApplicationDBContextGeneralConstr _context;
 
         /*
         public LegacyAuthenticationService(HttpClient httpClient)
@@ -12,7 +12,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _httpClient = httpClient;
         }
         */
-        public NotificationsService(ApplicationDBInstructionsContext context)
+        public NotificationsService(ApplicationDBContextGeneralConstr context)
         {
             _context = context;
         }

@@ -63,11 +63,11 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+builder.Services.AddDbContext<ApplicationDbContextUsers>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
-builder.Services.AddDbContext<ApplicationDBInstructionsContext>(options =>
+builder.Services.AddDbContext<ApplicationDBContextGeneralConstr>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment")));
-builder.Services.AddDbContext<ApplicationDBInstructionsContext>(options =>
+builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

@@ -21,9 +21,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         public async Task<string?> UserNameToTableName(string userName)
         {
             var temporaryConnectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-            var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+            var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
             temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
-            using (var context = new ApplicationDbContext(temporaryOptionsBuilder.Options))
+            using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
@@ -42,15 +42,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                     }
                 }
             }
-            return null;  // Consider returning null or an appropriate value if no data is found
+            return null;  
         }
 
 
-        public async Task<List<Dictionary<string, object>>> ReadDataFromDynamicTable(string tableName)
+        public async Task<List<Dictionary<string, object>>> ReadDataFromDynamicTable(string tableName, int? departmentId)
         {
-
-            var connectionString = _configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBInstructionsContext>();
+            string? connectionString = null;
+            switch (departmentId) 
+            {
+                case (1):
+                    connectionString = _configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
+                    break;
+                case (2):
+                    connectionString = _configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                    break;
+                default:
+                    break;
+            }
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
+            if (connectionString == null)
+                throw new ArgumentException("departmentId is invalid, check ReadDataFromDynamicTable");
             optionsBuilder.UseSqlServer(connectionString);
 
             
@@ -73,7 +85,7 @@ INNER JOIN
 WHERE 
     t.is_instruction_passed = 0"; //DON'T PUT THIS THING INTO ANOTHER FILE BECAUSE OF SECURITY STUFF
             // AND RENAME in SELECT table names into common classes constants!
-            using (var context = new ApplicationDBInstructionsContext(optionsBuilder.Options))
+            using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
@@ -97,6 +109,39 @@ WHERE
                     }
                 }
             }
+        }
+
+        internal async Task<int?> GetDepartmentIdToTableName(string userName)
+        {
+            var temporaryConnectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
+            var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
+            temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
+            using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
+            {
+                var conn = context.Database.GetDbConnection();
+                await conn.OpenAsync();
+                using (var command = conn.CreateCommand())
+                {
+
+                    command.CommandText = $"SELECT {DBProcessor.tableName_sql_departmentId} FROM [{DBProcessor.tableName_pos_users}] WHERE {DBProcessor.columnName_sql_pos_users_username} = @UserName";
+                    command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@UserName", SqlDbType.VarChar) { Value = userName });
+
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            if (!reader.IsDBNull(0))
+                            {
+                                int departmentId = reader.GetInt32(0);
+                                return departmentId;
+                            }
+                                
+                        }
+
+                    }
+                }
+            }
+            return null;
         }
     }
 }
