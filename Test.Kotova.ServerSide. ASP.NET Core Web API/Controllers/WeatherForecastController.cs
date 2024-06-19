@@ -31,9 +31,10 @@ using System.Net;
 using Microsoft.Data.SqlClient;
 using DocumentFormat.OpenXml.Bibliography;
 using System.Data;
+using System.Timers;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
-{
+{       
     [ApiController]
     [Route("[controller]")]
     public class InstructionsController : ControllerBase
@@ -42,6 +43,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private readonly ApplicationDBContextGeneralConstr _contextGeneralConstr;
         private readonly ApplicationDbContextUsers _userContext;
         private readonly ApplicationDBContextTechnicalDepartment _contextTechnicalDepartment;
+        private List<bool> ChiefsAreOnline = new List<bool>();
 
         public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment)
         {
@@ -58,6 +60,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             return Ok("Hello, World!");
         }
+
+        [Authorize]
+        [HttpGet("ping_to_server")]
+        public IActionResult pingToServer()
+        {
+            return Ok();
+        }
+
+
 
         [Authorize]
         [HttpGet("get_instructions_for_user")]
@@ -95,9 +106,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
+            int departmentId = await GetDepartmentIdFromUserName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
             
-            if (await passInstructionIntoDb(dictionaryOfInstruction, tableNameForUser))
+            if (await passInstructionIntoDb(dictionaryOfInstruction, tableNameForUser, departmentId))
             {
                 return Ok("Instruction Is passed, information added to Database");
             }
@@ -107,9 +119,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser)
+        private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser, int departmentId)
         {
-            var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
+
+            string? connectionString = _dataService._configuration.GetConnectionString(GetConnectionStringNameByDepartmentId(departmentId));
+
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
             optionsBuilder.UseSqlServer(connectionString);
 
@@ -320,18 +334,44 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         [HttpGet("sync-names-with-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public IActionResult SyncNamesWithDB()
+        public async Task<IActionResult> SyncNamesWithDB([FromServices] IConfiguration configuration)
         {
             try
             {
-                DBProcessor example = new DBProcessor(); // Rename class into something more accurate, if you can.
-                List<Tuple<string, string>> names_and_BirthDate = example.GetNames(example.GetConnectionString()); //Может заменить GetconnectionString на переменную или переместить функцию в этот файл?
-                return Ok(Encryption_Kotova.EncryptListOfTuples(names_and_BirthDate));
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim of Chief not found.");
+                }
+
+                int departmentId = await GetDepartmentIdFromUserName(username);
+                string? connectionString = configuration.GetConnectionString(GetConnectionStringNameByDepartmentId(departmentId));
+
+                if (string.IsNullOrEmpty(connectionString))
+                {
+                    return BadRequest("Connection string is not configured for the provided department ID.");
+                }
+
+                DBProcessor dbProcessor = new DBProcessor(connectionString);
+                List<Tuple<string, string>> namesAndBirthDates = dbProcessor.GetNames();
+                return Ok(Encryption_Kotova.EncryptListOfTuples(namesAndBirthDates));
             }
             catch (Exception ex)
             {
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
+        }
+        private string? GetConnectionStringNameByDepartmentId(int departmentId)
+        {
+            switch (departmentId)
+            {
+                case 1:
+                    return "DefaultConnectionForGeneralConstructionDepartment";
+                case 2:
+                    return "DefaultConnectionForTechnicalDepartment";
+                default:
+                    return null;
+            };
         }
 
         [HttpGet("sync-instructions-with-db")] //Make this load every 1 minute or something.!!!!!
@@ -340,7 +380,25 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                var instructions = await _contextGeneralConstr.Instructions.ToListAsync();
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim of Chief not found.");
+                }
+                List<Instruction> instructions = new List<Instruction>();
+                int departmentId = await GetDepartmentIdFromUserName(username);
+                switch (departmentId)
+                {
+                    case 1:
+                        instructions = await _contextGeneralConstr.Instructions.ToListAsync();
+                        break;
+                    case 2:
+                        instructions = await _contextTechnicalDepartment.Instructions.ToListAsync();
+                        break;
+                    case -1:
+                    default:
+                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                }
                 var serialized = JsonConvert.SerializeObject(instructions);
                 var encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
@@ -373,7 +431,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     // Return a 400 BadRequest with detailed information about what validation rules were violated
                     return BadRequest(ModelState);
                 }
-                DBProcessor example = new DBProcessor();
+
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim of Chief not found.");
+                }
+                string? connectionString = null;
+                int departmentId = await GetDepartmentIdFromUserName(username);
+                switch (departmentId)
+                {
+                    case 1:
+                        connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
+                        break;
+                    case 2:
+                        connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                        break;
+                    case -1:
+                    default:
+                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                }
+
+
+
+
+
+
+
+                DBProcessor example = new DBProcessor(connectionString);
                 // Here you would include any logic to process the package, e.g., storing it in a database asynchronously
                 bool result = await example.ProcessDataAsync(package);
                 if (result)
@@ -459,7 +544,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return Unauthorized("Username claim of Chief not found.");
                 }
-                int departmentId = await GetDepartmentIdFromChiefUserName(username);
+                int departmentId = await GetDepartmentIdFromUserName(username);
                 switch (departmentId)
                 {
                     case 1:
@@ -483,7 +568,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<int> GetDepartmentIdFromChiefUserName(string username)
+        private async Task<int> GetDepartmentIdFromUserName(string username)
         {
             var user = await _userContext.Users
             .Where(u => u.username == username)
@@ -700,7 +785,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     Console.WriteLine("Что за отдел? Непонятно. Проверь функцию FindNewEmployeeAndCreateInitialInstruction");
                     return null;
             }
-            return null; //Продолжить!
+            return null; //TODO: ПРОДОЛЖИТЬ ФУНКЦИЮ. ВАЖНО!
 
         }
 
@@ -722,6 +807,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 PersonnelNumber = personnelNumber;
                 DepartmentId = departmentNameToId(departmentName);
                 DeskNumber = deskNumber;
+                _dataService = dataService;
 
                 Random random = new Random();
                 int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number for User
@@ -729,7 +815,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 Password = Login;
                 HashedPassword = Encryption_Kotova.HashPassword(Password);
                 UserRoleIndex = IndexFromUserRole(userRole);
-                _dataService = dataService;
+                
             }
 
             private int? IndexFromUserRole(string userRole)
@@ -776,10 +862,100 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return $"Personnel Number: {PersonnelNumber}, Login: {Login}, Password: {Password}";
             }
         }
-    }   
+    }
+    public class PingController : ControllerBase
+    {
+        private static ChiefsManager chiefsManager = new ChiefsManager();
 
+        [HttpGet("ping/{chiefId}")]
+        public IActionResult Ping(int chiefId)
+        {
+            chiefsManager.PingChief(chiefId);
+            return Ok("Ping received for chief " + chiefId);
+        }
 
+        [HttpGet("status/{chiefId}")]
+        public IActionResult CheckStatus(int chiefId)
+        {
+            bool isOnline = chiefsManager.IsChiefOnline(chiefId);
+            return Ok(isOnline ? "Chief is online." : "Chief is offline.");
+        }
+    }
 
+    public class ChiefSession
+    {
+        public int ChiefId { get; private set; }
+        private System.Timers.Timer timer;
+        public bool IsChiefOnline { get; private set; } = true;
+
+        public ChiefSession(int chiefId)
+        {
+            ChiefId = chiefId;
+            // Timer setup: 60000 milliseconds = 1 minute
+            timer = new System.Timers.Timer(60000);
+            timer.Elapsed += CheckChiefActivity;
+            timer.AutoReset = false;  // Only trigger once unless reset
+            timer.Start();
+        }
+
+        public void ChiefPinged()
+        {
+            // Reset the timer each time a ping is received
+            timer.Stop();
+            timer.Start();
+            IsChiefOnline = true;
+        }
+
+        private void CheckChiefActivity(object sender, ElapsedEventArgs e)
+        {
+            IsChiefOnline = false;
+            // Additional logic when chief goes offline
+        }
+
+        public void EndSession()
+        {
+            timer.Stop();
+            timer.Dispose();
+        }
+    }
+
+    public class ChiefsManager
+    {
+        private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>();
+
+        public void PingChief(int chiefId)
+        {
+            if (sessions.ContainsKey(chiefId))
+            {
+                sessions[chiefId].ChiefPinged();
+            }
+            else
+            {
+                // If chief is not already registered, register and ping
+                var session = new ChiefSession(chiefId);
+                sessions.Add(chiefId, session);
+                session.ChiefPinged();
+            }
+        }
+
+        public bool IsChiefOnline(int chiefId)
+        {
+            if (sessions.ContainsKey(chiefId))
+            {
+                return sessions[chiefId].IsChiefOnline;
+            }
+            return false;
+        }
+
+        public void EndChiefSession(int chiefId)
+        {
+            if (sessions.ContainsKey(chiefId))
+            {
+                sessions[chiefId].EndSession();
+                sessions.Remove(chiefId);
+            }
+        }
+    }
 
     public class AuthenticationController : ControllerBase
     {

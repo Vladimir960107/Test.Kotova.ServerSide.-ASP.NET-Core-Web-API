@@ -69,6 +69,16 @@ class DBProcessor
 
     public const string birthDate_format = "yyyy-MM-dd";
 
+    public DBProcessor(string connectionString)
+    {
+        _fullConnectionString = connectionString;
+    }
+    public DBProcessor()
+    {
+        _fullConnectionString = null;
+    }
+
+    string? _fullConnectionString = null;
     public string GetConnectionString() // ВЕЗДЕ ПЕРЕПИСАТЬ ЭТУ ФИГНЮ НА То что из Program.cs, чтобы подключение было нормальным
     {
         // Use Windows Authentication for simplicity and security
@@ -253,11 +263,11 @@ class DBProcessor
         public string? Group { get; set; }
     }
 
-    public List<Tuple<string, string>> GetNames(string connectionString)
+    public List<Tuple<string, string>> GetNames()
     {
         List<Tuple<string, string>> names = new List<Tuple<string, string>>();
 
-        using (var connection = new SqlConnection(connectionString))
+        using (var connection = new SqlConnection(_fullConnectionString))
         {
             connection.Open(); // Open the database connection
             var query = $"SELECT {tableName_sql_names},{tableName_sql_BirthDate} FROM {tableName_sql_MainName}";
@@ -540,7 +550,7 @@ class DBProcessor
     {
         try
         {
-            using (var connection = new SqlConnection(GetConnectionString()))
+            using (var connection = new SqlConnection(_fullConnectionString))
             {
                 await connection.OpenAsync();
                 using (var transaction = connection.BeginTransaction())
