@@ -70,6 +70,9 @@ builder.Services.AddDbContext<ApplicationDBContextGeneralConstr>(options =>
 builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
 
+builder.Services.AddSingleton<ChiefsManager>();
+
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -126,6 +129,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<LegacyAuthenticationService>();
 builder.Services.AddScoped<NotificationsService>();
 builder.Services.AddScoped<MyDataService>();
+
 
 var app = builder.Build();
 

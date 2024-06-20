@@ -111,7 +111,7 @@ WHERE
             }
         }
 
-        internal async Task<int?> GetDepartmentIdToTableName(string userName)
+        internal async Task<int?> GetDepartmentIdByUserName(string userName)
         {
             var temporaryConnectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
             var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();

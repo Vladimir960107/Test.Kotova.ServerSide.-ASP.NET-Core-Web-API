@@ -61,14 +61,17 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok("Hello, World!");
         }
 
-        [Authorize]
-        [HttpGet("ping_to_server")]
-        public IActionResult pingToServer()
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [HttpGet("get-department-id-by/{userName}")]
+        public async Task<IActionResult> GetDepartmentIdByUserNameURL(string userName) //œÂÂ‰‚ËÌ¸ ˝ÚÛ ÙÛÌÍˆË˛ ‚ ËÌÒÚÛÍÚ‡ÊË, or something.
         {
-            return Ok();
+            int? departmentId = await _dataService.GetDepartmentIdByUserName(userName);
+            if (departmentId == null)
+            {
+                return BadRequest("departmentId wan't found by userName");
+            }
+            return Ok(departmentId);
         }
-
-
 
         [Authorize]
         [HttpGet("get_instructions_for_user")]
@@ -78,7 +81,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
-            int? departmentId = await _dataService.GetDepartmentIdToTableName(userName);
+            int? departmentId = await _dataService.GetDepartmentIdByUserName(userName);
             if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
             List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
             string serialized = JsonConvert.SerializeObject(whatever);
@@ -863,125 +866,40 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
     }
-    public class PingController : ControllerBase
-    {
-        private static ChiefsManager chiefsManager = new ChiefsManager();
-
-        [HttpGet("ping/{chiefId}")]
-        public IActionResult Ping(int chiefId)
-        {
-            chiefsManager.PingChief(chiefId);
-            return Ok("Ping received for chief " + chiefId);
-        }
-
-        [HttpGet("status/{chiefId}")]
-        public IActionResult CheckStatus(int chiefId)
-        {
-            bool isOnline = chiefsManager.IsChiefOnline(chiefId);
-            return Ok(isOnline ? "Chief is online." : "Chief is offline.");
-        }
-    }
-
-    public class ChiefSession
-    {
-        public int ChiefId { get; private set; }
-        private System.Timers.Timer timer;
-        public bool IsChiefOnline { get; private set; } = true;
-
-        public ChiefSession(int chiefId)
-        {
-            ChiefId = chiefId;
-            // Timer setup: 60000 milliseconds = 1 minute
-            timer = new System.Timers.Timer(60000);
-            timer.Elapsed += CheckChiefActivity;
-            timer.AutoReset = false;  // Only trigger once unless reset
-            timer.Start();
-        }
-
-        public void ChiefPinged()
-        {
-            // Reset the timer each time a ping is received
-            timer.Stop();
-            timer.Start();
-            IsChiefOnline = true;
-        }
-
-        private void CheckChiefActivity(object sender, ElapsedEventArgs e)
-        {
-            IsChiefOnline = false;
-            // Additional logic when chief goes offline
-        }
-
-        public void EndSession()
-        {
-            timer.Stop();
-            timer.Dispose();
-        }
-    }
-
-    public class ChiefsManager
-    {
-        private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>();
-
-        public void PingChief(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                sessions[chiefId].ChiefPinged();
-            }
-            else
-            {
-                // If chief is not already registered, register and ping
-                var session = new ChiefSession(chiefId);
-                sessions.Add(chiefId, session);
-                session.ChiefPinged();
-            }
-        }
-
-        public bool IsChiefOnline(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                return sessions[chiefId].IsChiefOnline;
-            }
-            return false;
-        }
-
-        public void EndChiefSession(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                sessions[chiefId].EndSession();
-                sessions.Remove(chiefId);
-            }
-        }
-    }
 
     public class AuthenticationController : ControllerBase
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
         private readonly IConfiguration _configuration;
         private readonly ApplicationDbContextUsers _context;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context)
+        private readonly ChiefsManager _chiefsManager;
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context, ChiefsManager chiefsManager)
         {
             _legacyAuthService = legacyAuthService;
             _configuration = configuration;
             _context = context;
+            _chiefsManager = chiefsManager;
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
             User userTemp = await GetUserByUsername(model.username);
-
             if (userTemp == null)
             {
                 return BadRequest($"user under name {model.username} wasn't found");
             }
-
+            
             (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
             {
+
+                if (_chiefsManager.IsChiefOnline(authenticationModel.Item2.department_id)) //TODO: Õ≈ –¿¡Œ“¿≈“! œ–ŒƒŒÀ∆¿… — ›“Œ√Œ ÃŒÃ≈Õ“¿!
+                {
+                    return Forbid("Current department already have Chief Authenticated. Ask him to close application and then after 1 minute - open your application.");
+                }
+
+
                 try
                 {
                     User? user = authenticationModel.Item2;
