@@ -49,8 +49,10 @@ class DBProcessor
     public const string tableName_sql_PN = "personnel_number";
     public const string tableName_sql_department = "department";
     public const string tableName_sql_departmentId = "department_id";
+    public const string tableName_sql_isChiefOnline = "is_chief_online";
     public const string tableName_sql_group = "group";
 
+    public const string tableName_sql_something = "dbo.departments";
     public const string tableName_sql_MainName = "dbo.Department_employees";
     public const string tableName_Instructions_sql = "dbo.Instructions";
     public const string connectionString_server = "localhost";

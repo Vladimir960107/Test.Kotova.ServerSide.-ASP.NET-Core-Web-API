@@ -18,6 +18,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
             timer.Start();
         }
 
+
         public void ChiefPinged()
         {
             // Reset the timer each time a ping is received
