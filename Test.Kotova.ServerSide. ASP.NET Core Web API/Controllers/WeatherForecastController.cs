@@ -894,7 +894,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             if (authenticationModel.Item1 == true)
             {
 
-                if (_chiefsManager.IsChiefOnline(authenticationModel.Item2.department_id)) //TODO: ме пюанрюер! опнднкфюи я щрнцн лнлемрю!
+                if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id)) //TODO: ме пюанрюер! опнднкфюи я щрнцн лнлемрю!
                 {
                     return Forbid("Current department already have Chief Authenticated. Ask him to close application and then after 1 minute - open your application.");
                 }

@@ -183,7 +183,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         }*/
 
 
-        public bool IsChiefOnline(int chiefId)
+        /*public bool IsChiefOnline(int chiefId)
         {
             if (sessions.ContainsKey(chiefId))
             {
@@ -191,7 +191,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             }
             return false;
 
-        }
+        }*/
 
         
 

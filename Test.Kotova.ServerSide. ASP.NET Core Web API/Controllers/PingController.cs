@@ -32,9 +32,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         [HttpGet("status/{chiefId}")]
-        public IActionResult CheckStatus(int chiefId)
+        public async Task<IActionResult> CheckStatus(int chiefId)
         {
-            bool isOnline = _chiefsManager.IsChiefOnline(chiefId);
+            bool isOnline = await _chiefsManager.IsChiefOnlineAsync(chiefId);
             return Ok(isOnline ? "Chief is online." : "Chief is offline.");
         }
     }
