@@ -7,7 +7,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 {
     public class ChiefsManager
     {
-        private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>();
+        //private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>(); not needed.
         private readonly string _connectionString;
         private ConcurrentDictionary<int, CancellationTokenSource> monitorTasks = new ConcurrentDictionary<int, CancellationTokenSource>();
 

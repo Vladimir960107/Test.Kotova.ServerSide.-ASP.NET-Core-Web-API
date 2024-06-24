@@ -2,7 +2,7 @@
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 {
-    public class ChiefSession
+    /*public class ChiefSession // Класс не нужен, пока что. Потому что не сработал
     {
         public int ChiefId { get; private set; }
         private System.Timers.Timer timer;
@@ -38,5 +38,5 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
             timer.Stop();
             timer.Dispose();
         }
-    }
+    }*/
 }

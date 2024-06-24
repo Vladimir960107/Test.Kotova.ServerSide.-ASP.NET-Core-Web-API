@@ -788,7 +788,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     Console.WriteLine("Что за отдел? Непонятно. Проверь функцию FindNewEmployeeAndCreateInitialInstruction");
                     return null;
             }
-            return null; //TODO: ПРОДОЛЖИТЬ ФУНКЦИЮ. ВАЖНО!
+            return null; // TODO: Продолжить! чтобы можно было закончить с вводными инструткажами.
+
+
 
         }
 
