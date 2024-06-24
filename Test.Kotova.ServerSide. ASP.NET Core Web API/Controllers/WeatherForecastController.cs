@@ -890,7 +890,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest($"user under name {model.username} wasn't found");
             }
             
-            (bool?,User?) authenticationModel = await _legacyAuthService.PerformLogin(userTemp, model.password);
+            (bool?,User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
             {
 

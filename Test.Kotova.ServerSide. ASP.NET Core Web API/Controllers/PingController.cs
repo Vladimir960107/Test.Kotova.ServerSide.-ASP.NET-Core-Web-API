@@ -17,11 +17,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        [HttpGet("ping/{chiefId}")] // НЕКРАСИВОЕ РЕШЕНИЕ С Ping/ping/chiefId, но вдруг chiefId == status/3 вместо ping, к примеру? хрен знает, вроде и пофиг, а вроде и уязвимость.
-        public async Task<IActionResult> Ping(int chiefId)
+        [HttpGet("ping-is-online/{chiefId}")] 
+        public async Task<IActionResult> PingIsOnline(int chiefId)
         {
             await _chiefsManager.PingChiefAsync(chiefId); //PingChief обычный не сработал. А точнее - не работает получение статуса. Как-будто sessions некорректно создаются или что-то. Поэтому с базой данных.
-            return Ok("Ping received for chief " + chiefId);
+            return Ok("Ping online received for chief " + chiefId);
+        }
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [HttpGet("ping-is-offline/{chiefId}")] 
+        public async Task<IActionResult> PingIsOffline(int chiefId)
+        {
+            await _chiefsManager.PingOfflineChiefAsync(chiefId);
+            return Ok("Ping offline received for chief " + chiefId);
         }
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         [HttpGet("status/{chiefId}")]

@@ -50,6 +50,7 @@ class DBProcessor
     public const string tableName_sql_department = "department";
     public const string tableName_sql_departmentId = "department_id";
     public const string tableName_sql_isChiefOnline = "is_chief_online";
+    public const string tableName_sql_lastOnlineSetUTC = "last_online_set_UTC";
     public const string tableName_sql_group = "group";
 
     public const string tableName_sql_something = "dbo.departments";

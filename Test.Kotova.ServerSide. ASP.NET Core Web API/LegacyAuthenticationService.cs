@@ -28,7 +28,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             _context = context;
         }
 
-        public async Task<(bool?, User?)> PerformLogin(User userTemp, string plainPassword)
+        public (bool?, User?) PerformLogin(User userTemp, string plainPassword)
         {
 
             bool isPasswordValid = BCrypt.Net.BCrypt.Verify(plainPassword, userTemp.password_hash);
