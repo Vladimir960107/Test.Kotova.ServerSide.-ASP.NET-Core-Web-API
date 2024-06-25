@@ -883,6 +883,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _chiefsManager = chiefsManager;
         }
 
+
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
@@ -896,9 +898,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             if (authenticationModel.Item1 == true)
             {
 
-                if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id)) //TODO: Õ≈ –¿¡Œ“¿≈“! œ–ŒƒŒÀ∆¿… — ›“Œ√Œ ÃŒÃ≈Õ“¿!
+                if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
                 {
-                    return Forbid("Current department already have Chief Authenticated. Ask him to close application and then after 1 minute - open your application.");
+
+                    return CustomForbid("Current department already have Chief Authenticated. Ask him to close application and then after 1 minute - open your application.");
                 }
 
 
@@ -930,6 +933,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 return Unauthorized("Authentication failed.");
             }
+        }
+
+        public IActionResult CustomForbid(string message)
+        {
+            var result = new ObjectResult(new { Message = message })
+            {
+                StatusCode = (int)HttpStatusCode.Forbidden
+            };
+            return result;
         }
 
         private async Task<User> GetUserByUsername(string username)
