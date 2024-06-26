@@ -9,7 +9,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
     {
         //private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>(); not needed.
         private readonly string _connectionString;
-        private ConcurrentDictionary<int, CancellationTokenSource> monitorTasks = new ConcurrentDictionary<int, CancellationTokenSource>();
+        private ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)> monitorTasks = new ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)>();
 
         public ChiefsManager(IConfiguration configuration)
         {
@@ -18,20 +18,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 
         public async Task PingChiefAsync(int chiefId)
         {
-            if (monitorTasks.TryRemove(chiefId, out var cts))
+            if (monitorTasks.TryRemove(chiefId, out var oldTaskInfo))
             {
+                oldTaskInfo.Cts.Cancel();
                 // Cancel any existing background task
-                cts.Cancel();
+                try
+                {
+                    await oldTaskInfo.MonitoringTask;
+                    Console.WriteLine($"Previous monitoring task for Chief ID {chiefId} has been successfully cancelled.");
+                }
+                catch (TaskCanceledException)
+                {
+                    Console.WriteLine($"Task for Chief ID {chiefId} was cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An error occurred while cancelling the task for Chief ID {chiefId}: {ex.Message}");
+                }
             }
 
             // Start a new task for the chief
             await UpdateChiefSessionAsync(chiefId);
             var newCts = new CancellationTokenSource();
-            monitorTasks.TryAdd(chiefId, newCts);
-            MonitorChiefStatusInBackground(chiefId, newCts.Token);
+            var newTask = MonitorChiefStatusInBackground(chiefId, newCts.Token);
+            monitorTasks.TryAdd(chiefId, (newCts, newTask));
         }
 
-        private async void MonitorChiefStatusInBackground(int chiefId, CancellationToken token)
+        private async Task MonitorChiefStatusInBackground(int chiefId, CancellationToken token)
         {
             try
             {
@@ -39,7 +52,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                 {
                     if (!await CheckChiefStatus(chiefId))
                     {
-                        // Stop monitoring if CheckChiefStatus returns false
                         break;
                     }
                     await Task.Delay(TimeSpan.FromSeconds(60), token);
@@ -47,14 +59,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             }
             catch (TaskCanceledException)
             {
-                // Handle task cancellation
                 Console.WriteLine($"Monitoring stopped for Chief ID {chiefId}");
             }
             finally
             {
                 if (monitorTasks.TryRemove(chiefId, out var _))
                 {
-                    Console.WriteLine($"Clean up task for Chief ID {chiefId}");
+                    Console.WriteLine($"Clean up task for Chief ID {chiefId} completed."); //ВАЖНО! TODO: НИ ЧЕРТА НЕ РАБОТАЕТ ТАК КАК ЗАДУМАНО. ВЫВОДИТ ЭТУ СТРОКУ ТОЛЬКО ПОСЛЕ ЗАКРЫТИЯ CHIEFOFDEPARTMENT. А НЕ ВО ВРЕМЯ ПИНГА. (Спроси мб Карачёва, почему так может быть).
                 }
             }
         }
