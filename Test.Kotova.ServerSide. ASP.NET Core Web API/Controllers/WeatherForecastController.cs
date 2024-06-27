@@ -136,10 +136,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string instructionIdColumn = DBProcessor.tableName_sql_USER_instruction_id; // The column name for instruction ID in the user table
             string isPassedColumn = DBProcessor.tableName_sql_USER_is_instruction_passed; // The column name for isPassed in the user table
 
+            string dateWhenPassed = DBProcessor.tableName_sql_USER_datePassed;
+            string dateWhenPassedUTCTime = DBProcessor.tableName_sql_User_datePassed_UTCTime;
+
             //string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
             string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions}
             string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
-                    SET [{isPassedColumn}] = 1
+                    SET [{isPassedColumn}] = 1,
+                       /* [{dateWhenPassedUTCTime}] = GETUTCDATE(), Разблокируй эту строку, в Production-е, только проверь, что всё работает после этого :) */
+                        [{dateWhenPassed}] = GETDATE()           
                     WHERE [{instructionIdColumn}] = @instructionId";
 
             using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))

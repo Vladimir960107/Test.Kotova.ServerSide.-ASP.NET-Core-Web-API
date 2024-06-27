@@ -66,6 +66,7 @@ class DBProcessor
     public const string tableName_sql_USER_instruction_id = "instruction_id";
     public const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
     public const string tableName_sql_USER_datePassed = "date_when_passed";
+    public const string tableName_sql_User_datePassed_UTCTime = "date_when_passed_UTC_Time";
     public const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
     public const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
     public const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
@@ -189,6 +190,7 @@ class DBProcessor
             {tableName_sql_USER_instruction_id} INT UNIQUE,
             {tableName_sql_USER_is_instruction_passed} BIT, 
             {tableName_sql_USER_datePassed} DATETIME,
+            {tableName_sql_User_datePassed_UTCTime} DATETIME,
             {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
             {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME);')
               PRINT 'Table {tableName} created successfully!';
@@ -231,6 +233,7 @@ class DBProcessor
                     {tableName_sql_USER_instruction_id} INT UNIQUE,
                     {tableName_sql_USER_is_instruction_passed} BIT, 
                     {tableName_sql_USER_datePassed} DATETIME,
+                    {tableName_sql_User_datePassed_UTCTime} DATETIME,
                     {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
                     {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME
                 )')

@@ -16,32 +16,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             _connectionString = configuration.GetConnectionString("DefaultConnectionForUsers");
         }
 
-        public async Task PingChiefAsync(int chiefId)
+        public async Task PingChiefAsync(int chiefId) // ЗДЕСЬ СОБСТВЕННО СЮДА ПИНГУЕТ С КЛИЕНТСКОГО ПРИЛОЖЕНИЯ КАЖДЫЕ 30 СЕКУНД. 
         {
-            if (monitorTasks.TryRemove(chiefId, out var oldTaskInfo))
+            // Check if there is an existing task and whether it is still running.
+            if (monitorTasks.TryGetValue(chiefId, out var existingTaskInfo))
             {
-                oldTaskInfo.Cts.Cancel();
-                // Cancel any existing background task
-                try
+                // Check if the task has completed or has been cancelled.
+                if (existingTaskInfo.MonitoringTask.IsCompleted || existingTaskInfo.MonitoringTask.IsCanceled)
                 {
-                    await oldTaskInfo.MonitoringTask;
-                    Console.WriteLine($"Previous monitoring task for Chief ID {chiefId} has been successfully cancelled.");
+                    // If the task is no longer active, remove it from the dictionary.
+                    if (monitorTasks.TryRemove(chiefId, out var removedTaskInfo))
+                    {
+                        Console.WriteLine($"Completed monitoring task for Chief ID {chiefId} removed.");
+                    }
                 }
-                catch (TaskCanceledException)
+                else
                 {
-                    Console.WriteLine($"Task for Chief ID {chiefId} was cancelled.");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"An error occurred while cancelling the task for Chief ID {chiefId}: {ex.Message}");
+                    // If the task is still active, simply return and do nothing.
+                    Console.WriteLine($"Monitoring task for Chief ID {chiefId} is still active. No new task started.");
+                    return;
                 }
             }
 
-            // Start a new task for the chief
+            // Proceed to update the session in the database.
             await UpdateChiefSessionAsync(chiefId);
+
+            // If no active monitoring task exists, start a new one.
             var newCts = new CancellationTokenSource();
             var newTask = MonitorChiefStatusInBackground(chiefId, newCts.Token);
             monitorTasks.TryAdd(chiefId, (newCts, newTask));
+            Console.WriteLine($"New monitoring task started for Chief ID {chiefId}.");
         }
 
         private async Task MonitorChiefStatusInBackground(int chiefId, CancellationToken token)
@@ -65,7 +69,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             {
                 if (monitorTasks.TryRemove(chiefId, out var _))
                 {
-                    Console.WriteLine($"Clean up task for Chief ID {chiefId} completed."); //ВАЖНО! TODO: НИ ЧЕРТА НЕ РАБОТАЕТ ТАК КАК ЗАДУМАНО. ВЫВОДИТ ЭТУ СТРОКУ ТОЛЬКО ПОСЛЕ ЗАКРЫТИЯ CHIEFOFDEPARTMENT. А НЕ ВО ВРЕМЯ ПИНГА. (Спроси мб Карачёва, почему так может быть).
+                    Console.WriteLine($"Clean up task for Chief ID {chiefId} completed."); //ВАЖНО! TODO: Не работает так как задумано.
                 }
             }
         }
@@ -98,7 +102,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 
         public async Task<bool> CheckChiefStatus(int chiefId)
         {
-            var threshold = DateTime.UtcNow.AddSeconds(-60);
+            var threshold = DateTime.UtcNow.AddSeconds(-60);  // Adjust based on your session timeout needs
 
             string query = $"SELECT {DBProcessor.tableName_sql_lastOnlineSetUTC}, {DBProcessor.tableName_sql_isChiefOnline} " +
                            $"FROM {DBProcessor.tableName_sql_something} " +
@@ -113,32 +117,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 
                     using (var reader = await command.ExecuteReaderAsync())
                     {
-                        if (await reader.ReadAsync()) // Ensures that there is at least one row
+                        if (await reader.ReadAsync())
                         {
-                            if (!reader.IsDBNull(reader.GetOrdinal(DBProcessor.tableName_sql_isChiefOnline)) &&
-                                reader.GetBoolean(reader.GetOrdinal(DBProcessor.tableName_sql_isChiefOnline)) == false)
+                            DateTime lastOnlineTime = reader.GetDateTime(reader.GetOrdinal(DBProcessor.tableName_sql_lastOnlineSetUTC));
+                            bool isChiefOnline = reader.GetBoolean(reader.GetOrdinal(DBProcessor.tableName_sql_isChiefOnline));
+                            if (lastOnlineTime <= threshold || !isChiefOnline)
                             {
-                                return false; // Returns false if chief_is_online is 0
+                                UpdateChiefSessionAsyncToAnotherValue(chiefId);  // Logic here should ensure the session is set appropriately
+                                return false;
                             }
-
-                            if (!reader.IsDBNull(reader.GetOrdinal(DBProcessor.tableName_sql_lastOnlineSetUTC)))
+                            else
                             {
-                                DateTime lastOnlineTime = reader.GetDateTime(reader.GetOrdinal(DBProcessor.tableName_sql_lastOnlineSetUTC));
-                                if (lastOnlineTime > threshold)
-                                {
-                                    return true; 
-                                }
-                                else
-                                {
-                                    UpdateChiefSessionAsyncToAnotherValue(chiefId); //sets to false chief session cause it is more than 1 minute passed, and chief is probably closed improperly application, so that Chief didn't ping to server about closing.
-                                    return false;
-                                }
+                                return true;
                             }
                         }
                     }
-                    return false; // Return false if no rows, or DBNull values for critical fields
                 }
             }
+            return false;  // No session exists, potentially start a new one
         }
 
         private async Task UpdateChiefSessionAsyncToAnotherValue(int chiefId)
@@ -173,7 +169,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                     command.Parameters.AddWithValue("@ChiefId", chiefId);
 
                     var result = await command.ExecuteScalarAsync();
-                    return result != DBNull.Value && (bool)result; // Не понимаю зачем здесь это, разберись позже как будет время. зачем точнее DBNull.Value и && с bool(result)
+                    return result != DBNull.Value && (bool)result; // Не до конца понимаю зачем здесь это, разберись позже как будет время. зачем точнее DBNull.Value и && с bool(result)
                 }
             }
         }
