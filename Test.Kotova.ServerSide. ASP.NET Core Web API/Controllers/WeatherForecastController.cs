@@ -874,18 +874,67 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
     }
 
+
     public class AuthenticationController : ControllerBase
     {
         private readonly LegacyAuthenticationService _legacyAuthService;
         private readonly IConfiguration _configuration;
         private readonly ApplicationDbContextUsers _context;
         private readonly ChiefsManager _chiefsManager;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context, ChiefsManager chiefsManager)
+        private readonly JwtTokenValidator _jwtTokenValidator;
+        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context, ChiefsManager chiefsManager, JwtTokenValidator jwtTokenValidator)
         {
             _legacyAuthService = legacyAuthService;
             _configuration = configuration;
             _context = context;
             _chiefsManager = chiefsManager;
+            _jwtTokenValidator = jwtTokenValidator;
+        }
+
+
+
+        /*[HttpPost("validate-token")]
+        public IActionResult ValidateToken([FromHeader(Name = "Authorization")] string authorization)
+        {
+            if (string.IsNullOrEmpty(authorization) || !authorization.StartsWith("Bearer "))
+            {
+                return Unauthorized();
+            }
+
+            var token = authorization.Substring("Bearer ".Length).Trim();
+            var principal = _jwtTokenValidator.ValidateToken(token);
+
+            if (principal == null)
+            {
+                return Unauthorized();
+            }
+
+            // Optionally: You could regenerate a new token here if needed
+            // var newToken = GenerateNewToken(principal);
+            // return Ok(new { token = newToken });
+
+            return Ok("Token is valid.");
+        }*/
+
+        [HttpPost("validate-token")]
+        public IActionResult ValidateToken([FromBody] string token)
+        {
+            if (string.IsNullOrEmpty(token))
+            {
+                Console.WriteLine("Token is null or empty.");
+                return Unauthorized("Validation failed, Token is null or empty.");
+            }
+
+            var principal = _jwtTokenValidator.ValidateToken(token);
+
+            if (principal == null)
+            {
+                Console.WriteLine("Token validation failed.");
+                return Unauthorized("Validation failed, token is invalid");
+            }
+
+            Console.WriteLine("Token validation succeeded.");
+            return Ok();
         }
 
 

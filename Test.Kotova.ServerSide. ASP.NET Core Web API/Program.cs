@@ -11,6 +11,7 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using System.Security.Cryptography.X509Certificates;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +27,13 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
         });
     });
 });
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("logs/log.txt", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 
 
@@ -71,7 +79,8 @@ builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
 
 builder.Services.AddSingleton<ChiefsManager>();
-
+builder.Services.AddSingleton<IHostedService, GracefulShutdownService>();
+builder.Services.AddSingleton<JwtTokenValidator>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -82,8 +91,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = "yourdomain.com",
-            ValidAudience = "yourdomain.com",
+            ValidIssuer = builder.Configuration["JwtConfig:Issuer"],
+            ValidAudience = builder.Configuration["JwtConfig:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"]))
         };

@@ -53,7 +53,7 @@ class DBProcessor
     public const string tableName_sql_lastOnlineSetUTC = "last_online_set_UTC";
     public const string tableName_sql_group = "group";
 
-    public const string tableName_sql_something = "dbo.departments";
+    public const string tableName_sql_departments_NameDB = "dbo.departments";
     public const string tableName_sql_MainName = "dbo.Department_employees";
     public const string tableName_Instructions_sql = "dbo.Instructions";
     public const string connectionString_server = "localhost";

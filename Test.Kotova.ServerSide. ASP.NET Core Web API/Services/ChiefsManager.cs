@@ -77,7 +77,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 
         private async Task UpdateChiefSessionAsync(int chiefId)
         {
-            string query = $"UPDATE {DBProcessor.tableName_sql_something} " +
+            string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
                $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue, " +
                $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @CurrentDateTime "+
                $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
@@ -105,7 +105,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
             var threshold = DateTime.UtcNow.AddSeconds(-60);  // Adjust based on your session timeout needs
 
             string query = $"SELECT {DBProcessor.tableName_sql_lastOnlineSetUTC}, {DBProcessor.tableName_sql_isChiefOnline} " +
-                           $"FROM {DBProcessor.tableName_sql_something} " +
+                           $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
                            $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
 
             using (var connection = new SqlConnection(_connectionString))
@@ -139,7 +139,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 
         private async Task UpdateChiefSessionAsyncToAnotherValue(int chiefId)
         {
-            string query = $"UPDATE {DBProcessor.tableName_sql_something} " +
+            string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
                            $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue " +
                            $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
             using (var connection = new SqlConnection(_connectionString))
@@ -158,7 +158,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         public async Task<bool> IsChiefOnlineAsync(int chiefId)
         {
             string query = $"SELECT {DBProcessor.tableName_sql_isChiefOnline} " +
-                           $"FROM {DBProcessor.tableName_sql_something} " +
+                           $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
                            $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
 
             using (var connection = new SqlConnection(_connectionString))
