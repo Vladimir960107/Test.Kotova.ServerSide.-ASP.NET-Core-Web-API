@@ -78,12 +78,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         public async Task<IActionResult> GetNotifications()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string? userRole = User.FindFirst(ClaimTypes.Role)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
             int? departmentId = await _dataService.GetDepartmentIdByUserName(userName);
             if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
-            List<Dictionary<string, object>> whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
+            object whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
             string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
             return Ok(encryptedData);
@@ -447,6 +446,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 string? connectionString = null;
                 int departmentId = await GetDepartmentIdFromUserName(username);
+
                 switch (departmentId)
                 {
                     case 1:
@@ -541,10 +541,22 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         [HttpPost("add-new-instruction-into-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] Instruction instruction)
+        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] FullCustomInstruction fullInstruction)
         {
             try
             {
+                Instruction instruction = fullInstruction._instruction; //ПРОДОЛЖИТЬ paths в database framework entity закинь. Короче продолжай с этого места!
+                List<string> paths = fullInstruction._paths;
+                List<FilePath> pathsOfFilePath = new List<FilePath>();
+                foreach (string path in paths)
+                {
+                    FilePath filePath = new FilePath();
+                    filePath.file_path = path;
+                    //filePath.instruction_id = instruction.instruction_id;
+                    filePath.instruction_id = 10;
+                    pathsOfFilePath.Add(filePath);
+
+                }
                 
                 instruction.begin_date = DateTime.UtcNow;
                 var username = User.FindFirst(ClaimTypes.Name)?.Value;
@@ -556,17 +568,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 switch (departmentId)
                 {
                     case 1:
-                        _contextGeneralConstr.Instructions.Add(instruction);
+                        var something = _contextGeneralConstr.Instructions.Add(instruction);
+                        await _contextGeneralConstr.SaveChangesAsync();
+                        foreach (FilePath filePath in pathsOfFilePath)
+                        {
+                            filePath.instruction_id = instruction.instruction_id;
+                            _contextGeneralConstr.FilePaths.Add(filePath);
+                        }
                         await _contextGeneralConstr.SaveChangesAsync();
                         break;
                     case 2:
                         _contextTechnicalDepartment.Instructions.Add(instruction);
                         await _contextTechnicalDepartment.SaveChangesAsync();
+                        foreach (FilePath filePath in pathsOfFilePath)
+                        {
+                            filePath.instruction_id = instruction.instruction_id;
+                            _contextTechnicalDepartment.FilePaths.Add(filePath);
+                        }
+                        await _contextTechnicalDepartment.SaveChangesAsync();
                         break;
                     case -1:
                     default:
                         return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
-                }    
+                }
                 return Ok(instruction);
             }
             catch (Exception ex) 

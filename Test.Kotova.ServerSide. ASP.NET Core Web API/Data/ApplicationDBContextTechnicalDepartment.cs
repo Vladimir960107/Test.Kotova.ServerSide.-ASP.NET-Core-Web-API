@@ -9,6 +9,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
 
         public DbSet<Employee> Department_employees { get; set; }
 
+        public DbSet<FilePath> FilePaths { get; set; }
+
         public ApplicationDBContextTechnicalDepartment(DbContextOptions<ApplicationDBContextTechnicalDepartment> option)
             : base(option)
         {
