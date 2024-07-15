@@ -32,6 +32,9 @@ using Microsoft.Data.SqlClient;
 using DocumentFormat.OpenXml.Bibliography;
 using System.Data;
 using System.Timers;
+using System.Transactions;
+
+using System.Data.SqlClient;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {       
@@ -139,7 +142,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string dateWhenPassedUTCTime = DBProcessor.tableName_sql_User_datePassed_UTCTime;
 
             //string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
-            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions}
+            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions} //TODO Разблокируй следующую строку, где GETUTCDATE()
             string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
                     SET [{isPassedColumn}] = 1,
                        /* [{dateWhenPassedUTCTime}] = GETUTCDATE(), Разблокируй эту строку, в Production-е, только проверь, что всё работает после этого :) */
@@ -423,6 +426,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
 
             //if (string.IsNullOrEmpty(encryptedData))
+            var username = User.FindFirst(ClaimTypes.Name)?.Value;
+            return await SendInstructionAndNamesInternal(package, username);
+        }
+        private async Task<IActionResult> SendInstructionAndNamesInternal(InstructionPackage package, string? username)
+        {
             if (package == null)
             {
                 return BadRequest("Empty or null encrypted payload is not acceptable.");
@@ -438,33 +446,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     // Return a 400 BadRequest with detailed information about what validation rules were violated
                     return BadRequest(ModelState);
                 }
-
-                var username = User.FindFirst(ClaimTypes.Name)?.Value;
                 if (string.IsNullOrEmpty(username))
                 {
-                    return Unauthorized("Username claim of Chief not found.");
+                    //return Unauthorized("Username claim of Chief not found.");
+                    return Unauthorized("username claim of Chief(or User when used by Coordinator) не найден.");
                 }
                 string? connectionString = null;
                 int departmentId = await GetDepartmentIdFromUserName(username);
 
-                switch (departmentId)
-                {
-                    case 1:
-                        connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
-                        break;
-                    case 2:
-                        connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
-                        break;
-                    case -1:
-                    default:
-                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
-                }
-
-
-
-
-
-
+                connectionString = GetConnectionStringByDepartmentId(departmentId);
 
                 DBProcessor example = new DBProcessor(connectionString);
                 // Here you would include any logic to process the package, e.g., storing it in a database asynchronously
@@ -483,6 +473,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 // If an error occurs, log it and return a BadRequest with the error message
                 Console.WriteLine(ex.ToString());
                 return BadRequest($"An error occurred while processing the instruction and names: {ex.Message}");
+            }
+        }
+
+
+        private string GetConnectionStringByDepartmentId(int departmentId)
+        {
+            switch (departmentId)
+            {
+                case 1:
+                    return _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
+                case 2:
+                    return _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                default:
+                    return null;
+            }
+        }
+
+        private ApplicationDBContextBase GetDbContextForDepartment(int departmentId)
+        {
+            switch (departmentId)
+            {
+                case 1:
+                    return _contextGeneralConstr;
+                case 2:
+                    return _contextTechnicalDepartment;
+                default:
+                    return null;
             }
         }
 
@@ -539,65 +556,87 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return newestFile.FullName;
         }
 
-        [HttpPost("add-new-instruction-into-db")]
+        [HttpPost("add-new-instruction-into-db")]  //ПРОДОЛЖИ С ЭТОГО МЕСТА ИСКАТЬ КАК ВПИХНУТЬ ВВОДНЫЙ ИНСТРУКТАЖ В ФУНКЦИЮ ПО ДОБАВЛЕНИЮ ОБЫЧНОЙ ИНСТРУКЦИИ!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] FullCustomInstruction fullInstruction)
         {
             try
             {
-                Instruction instruction = fullInstruction._instruction; //ПРОДОЛЖИТЬ paths в database framework entity закинь. Короче продолжай с этого места!
-                List<string> paths = fullInstruction._paths;
-                List<FilePath> pathsOfFilePath = new List<FilePath>();
-                foreach (string path in paths)
-                {
-                    FilePath filePath = new FilePath();
-                    filePath.file_path = path;
-                    //filePath.instruction_id = instruction.instruction_id;
-                    filePath.instruction_id = 10;
-                    pathsOfFilePath.Add(filePath);
-
-                }
-                
-                instruction.begin_date = DateTime.UtcNow;
                 var username = User.FindFirst(ClaimTypes.Name)?.Value;
                 if (string.IsNullOrEmpty(username))
                 {
                     return Unauthorized("Username claim of Chief not found.");
                 }
+
+                // Call the internal method and pass the necessary parameters
+                var result = await AddNewInstructionInternal(fullInstruction, username);
+
+                // Return the appropriate HTTP response based on the result
+                if (result.Success)
+                {
+                    return Ok(result.Instruction);
+                }
+                else
+                {
+                    return BadRequest(result.ErrorMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+                return BadRequest("Can't add instruction to DB. Most probably cause of instruction already exists in DB");
+            }
+        }
+
+        private async Task<(bool Success, Instruction Instruction, string ErrorMessage)> AddNewInstructionInternal(FullCustomInstruction fullInstruction, string username)
+        {
+            try
+            {
+                Instruction instruction = fullInstruction._instruction;
+                List<string> paths = fullInstruction._paths;
+
+                List<FilePath> pathsOfFilePath = paths.Select(path => new FilePath
+                {
+                    file_path = path // Placeholder instruction_id will be updated after saving instruction! So don't worry :) its not gonna be null;
+                }).ToList();
+
+                instruction.begin_date = DateTime.UtcNow;
+
                 int departmentId = await GetDepartmentIdFromUserName(username);
                 switch (departmentId)
                 {
                     case 1:
-                        var something = _contextGeneralConstr.Instructions.Add(instruction);
-                        await _contextGeneralConstr.SaveChangesAsync();
-                        foreach (FilePath filePath in pathsOfFilePath)
-                        {
-                            filePath.instruction_id = instruction.instruction_id;
-                            _contextGeneralConstr.FilePaths.Add(filePath);
-                        }
-                        await _contextGeneralConstr.SaveChangesAsync();
+                        await SaveInstructionWithFilePaths(_contextGeneralConstr, instruction, pathsOfFilePath);
                         break;
                     case 2:
-                        _contextTechnicalDepartment.Instructions.Add(instruction);
-                        await _contextTechnicalDepartment.SaveChangesAsync();
-                        foreach (FilePath filePath in pathsOfFilePath)
-                        {
-                            filePath.instruction_id = instruction.instruction_id;
-                            _contextTechnicalDepartment.FilePaths.Add(filePath);
-                        }
-                        await _contextTechnicalDepartment.SaveChangesAsync();
+                        await SaveInstructionWithFilePaths(_contextTechnicalDepartment, instruction, pathsOfFilePath);
                         break;
                     case -1:
                     default:
-                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                        return (false, null, "Not Implemented case in function AddNewInstructionInternal, check for error there");
                 }
-                return Ok(instruction);
+
+                return (true, instruction, null);
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 Console.WriteLine(ex.ToString());
-                return BadRequest("Can't add instruction to DB. Most probably cause of instruction already exist in DB");
+                return (false, null, "Can't add instruction to DB. Most probably cause of instruction already exists in DB");
             }
+        }
+
+        private async Task SaveInstructionWithFilePaths(ApplicationDBContextBase context, Instruction instruction, List<FilePath> pathsOfFilePath)
+        {
+            context.Instructions.Add(instruction);
+            await context.SaveChangesAsync();
+
+            foreach (var filePath in pathsOfFilePath)
+            {
+                filePath.instruction_id = instruction.instruction_id;
+                context.FilePaths.Add(filePath);
+            }
+
+            await context.SaveChangesAsync();
         }
 
         private async Task<int> GetDepartmentIdFromUserName(string username)
@@ -666,7 +705,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
 
-        [HttpPost("insert-new-employee")]
+        [HttpPost("insert-new-employee")] // TODO: Это надо переделать, так как сервер возвращает что всё хорошо даже когда это не так :/
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> InsertNewcomerIntoDb([FromBody] Employee newcomer)
         {
@@ -675,155 +714,231 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest(ModelState);
             }
 
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
-            string? connectionString = null;
+            ApplicationDBContextBase context;
             switch (newcomer.department)
             {
                 case "Общестроительный отдел":
-                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
+                    context = _contextGeneralConstr;
                     break;
                 case "Технический отдел":
-                    connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                    context = _contextTechnicalDepartment;
                     break;
+                default:
+                    return BadRequest("Invalid department");
             }
 
-            if (string.IsNullOrEmpty(connectionString))
+            bool employeeExists = await context.Department_employees
+                .AnyAsync(e => e.personnel_number == newcomer.personnel_number);
+            bool tablePNExists = await DoesTableExistAsync(context, newcomer.personnel_number);
+
+            if (employeeExists)
             {
-                return BadRequest("Invalid department");
+                return BadRequest("An employee with the same PersonnelNumber already exists.");
             }
-
-            optionsBuilder.UseSqlServer(connectionString);
-
-            using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
+            if (tablePNExists)
             {
-                bool employeeExists = await context.Department_employees
-                    .AnyAsync(e => e.personnel_number == newcomer.personnel_number);
-                bool tablePNExists = await DoesTableExistAsync(context, newcomer.personnel_number);
-
-                if (employeeExists)
-                {
-                    return BadRequest("An employee with the same PersonnelNumber already exists.");
-                }
-                if (tablePNExists)
-                {
-                    return BadRequest("A table with the same PersonnelNumber already exists.");
-                }
-
-                try
-                {
-                    await DBProcessor.CreateTableDIAsync(newcomer.personnel_number, connectionString);
-                }
-                catch (Exception ex)
-                {
-                    return BadRequest($"A table with new personnel number can't be created: {ex.Message}");
-                }
-
-                context.Department_employees.Add(newcomer);
-                int rowsAffected = await context.SaveChangesAsync();
-
-                if (rowsAffected > 0)
-                {
-                    return Ok("Employee inserted into DB");
-                }
-                return BadRequest("Something went wrong, employee not inserted. Check InsertNewcomerIntoDb.");
+                return BadRequest("A table with the same PersonnelNumber already exists.");
             }
+
+            try
+            {
+                string connectionString = context.Database.GetDbConnection().ConnectionString;
+                await DBProcessor.CreateTableDIAsync(newcomer.personnel_number, connectionString);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"A table with new personnel number can't be created: {ex.Message}");
+            }
+
+            context.Department_employees.Add(newcomer);
+            int rowsAffected = await context.SaveChangesAsync();
+
+            if (rowsAffected > 0)
+            {
+                return Ok("Employee inserted into DB");
+            }
+            return BadRequest("Something went wrong, employee not inserted. Check InsertNewcomerIntoDb.");
         }
-        private async Task<bool> DoesTableExistAsync(ApplicationDBContextGeneralConstr context, string personnelNumber) //Don't work!
-        {
-            var tableName = $"dbo.{personnelNumber}";
 
+
+        private async Task<bool> DoesTableExistAsync<TContext>(TContext context, string tableName) where TContext : DbContext
+        {
             var sqlQuery = "SELECT CASE WHEN EXISTS (" +
                            "SELECT * FROM INFORMATION_SCHEMA.TABLES " +
                            "WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tableName) " +
                            "THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END";
 
-            var parameter = new SqlParameter("@tableName", personnelNumber);
+            var parameter = new Microsoft.Data.SqlClient.SqlParameter("@tableName", tableName);
 
-            bool exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter) == 1;
-            return exists;
+            var exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter);
+            return exists == 1;
         }
+
+
         [HttpPost("get-login-and-password-for-newcommer")]
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] List<string> someInfoAboutNewUser)
         {
             UserTemp newUser = new UserTemp(someInfoAboutNewUser[0], someInfoAboutNewUser[1], someInfoAboutNewUser[2], someInfoAboutNewUser[3], _dataService);
 
+            bool isNeededToCreateInitialInstruction = someInfoAboutNewUser[4] == "True"; 
+
             try
             {
-                if (newUser.UserRoleIndex is null) { return BadRequest($"userRole {someInfoAboutNewUser[3]} is invalid to be put into Database, returning null"); }
-
-                var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-                temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
-
-                using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
+                if (newUser.UserRoleIndex is null)
                 {
-                    var conn = context.Database.GetDbConnection();
-                    await conn.OpenAsync();
-                    using (var command = conn.CreateCommand())
+                    return BadRequest($"userRole {someInfoAboutNewUser[3]} is invalid to be put into Database, returning null");
+                }
+
+                var user = new User
+                {
+                    username = newUser.Login,
+                    password_hash = newUser.HashedPassword,
+                    user_role = newUser.UserRoleIndex.Value,
+                    current_personnel_number = newUser.PersonnelNumber,
+                    department_id = newUser.DepartmentId.Value,
+                    desk_number = newUser.DeskNumber
+                };
+
+                _userContext.Users.Add(user);
+                int result = await _userContext.SaveChangesAsync();
+
+                if (result > 0)
+                {
+                    var whatever = new Tuple<string, string>(newUser.Login, newUser.Password);
+                    string serialized = JsonConvert.SerializeObject(whatever);
+
+                    if (isNeededToCreateInitialInstruction)
                     {
-                        command.CommandText = "INSERT INTO dbo.users (username, password_hash, user_role, current_personnel_number, department_id, desk_number) " +
-                                              "VALUES (@username, @password_hash, @user_role, @current_personnel_number, @department_id, @desk_number)";
+                        await FindNewEmployeeAndCreateInitialInstruction(newUser.PersonnelNumber, newUser.DepartmentId);
+                    }
 
-                        command.Parameters.Add(new SqlParameter("@username", SqlDbType.VarChar) { Value = newUser.Login });
-                        command.Parameters.Add(new SqlParameter("@password_hash", SqlDbType.VarChar) { Value = newUser.HashedPassword }); 
-                        command.Parameters.Add(new SqlParameter("@user_role", SqlDbType.Int) { Value = newUser.UserRoleIndex });
-                        command.Parameters.Add(new SqlParameter("@current_personnel_number", SqlDbType.VarChar) { Value = newUser.PersonnelNumber });
-                        command.Parameters.Add(new SqlParameter("@department_id", SqlDbType.Int) { Value = newUser.DepartmentId });
-                        command.Parameters.Add(new SqlParameter("@desk_number", SqlDbType.Int) { Value = newUser.DeskNumber });
+                    return Ok(serialized);
+                }
+                else
+                {
+                    Console.WriteLine("Error inserting user.");
+                    return BadRequest($"Couldn't insert user: {newUser.Login} into database");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception: {ex.Message}");
+                return BadRequest("Something went wrong while inserting user");
+            }
+        }
 
-                        int result = await command.ExecuteNonQueryAsync();
 
-                        if (result > 0)
+        private async Task FindNewEmployeeAndCreateInitialInstruction(string personnelNumber, int? departmentId)
+        {
+            try
+            {
+                var user = await _userContext.Users
+                    .Where(u => u.current_personnel_number == personnelNumber && u.department_id == departmentId)
+                    .FirstOrDefaultAsync();
+
+                if (user == null)
+                {
+                    Console.WriteLine("User not found.");
+                    return;
+                }
+
+                var initialInstruction = new Instruction
+                {
+                    cause_of_instruction = $"Вводный инструктаж для {personnelNumber}",
+                    begin_date = DateTime.UtcNow,
+                    end_date = DateTime.UtcNow.AddMonths(1),
+                    path_to_instruction = null,
+                    type_of_instruction = 0, // 0 represents Вводный инструктаж
+                };
+
+                var fullCustomInstruction = new FullCustomInstruction
+                {
+                    _instruction = initialInstruction,
+                    _paths = new List<string?> { null }
+                };
+
+                var result = await AddNewInstructionInternal(fullCustomInstruction, user.username);
+
+                if (!result.Success)
+                {
+                    Console.WriteLine(result.ErrorMessage);
+                }
+                else
+                {
+                    var result2 = await AssignNewInstructionToUser(fullCustomInstruction, departmentId, personnelNumber);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+            }
+        }
+
+        private async Task<bool> AssignNewInstructionToUser(FullCustomInstruction fullCustomInstruction, int? departmentId, string personnelNumber)
+        {
+            if (departmentId == null) return false;
+            int departmentIdNotNull = departmentId.Value;
+
+            ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentIdNotNull);
+            if (dbContext == null) return false;
+
+            try
+            {
+                string connectionString = dbContext.Database.GetDbConnection().ConnectionString;
+                using (var connection = new System.Data.SqlClient.SqlConnection(connectionString))
+                {
+                    await connection.OpenAsync();
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        try
                         {
-                            var whatever = new Tuple<string, string>(newUser.Login, newUser.Password);
+                            // Get the instruction ID from the fullCustomInstruction object
+                            var instructionId = fullCustomInstruction._instruction.instruction_id;
 
-                            string serialized = JsonConvert.SerializeObject(whatever);
-                            _ = FindNewEmployeeAndCreateInitialInstruction(newUser.PersonnelNumber, newUser.DepartmentId);
-                            return Ok(serialized);
+                            // Prepare the list of personnel numbers to notify
+                            List<string> personnelNumbers = new List<string> { personnelNumber };
+
+                            DBProcessor dBProcessor = new DBProcessor(connectionString);
+                            // Call the SendNotificationToPeopleAsync method to send the notification
+                            var isNotificationSent = await dBProcessor.SendNotificationToPeopleAsync(personnelNumbers, instructionId, connection, transaction);
+
+                            if (!isNotificationSent)
+                            {
+                                transaction.Rollback();
+                                return false;
+                            }
+
+                            transaction.Commit();
+                            return true;
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            Console.WriteLine("Error inserting user.");
-                            return BadRequest($"Coudn't insert user:{newUser.Login} into database");
+                            Console.WriteLine(ex.ToString());
+                            transaction.Rollback();
+                            return false;
                         }
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                return BadRequest("something went wrong while inserting user");
+                Console.WriteLine(ex.ToString());
+                return false;
             }
         }
 
-        private object FindNewEmployeeAndCreateInitialInstruction(string personnelNumber, int? departmentId)
+        [HttpGet("get-list-of-people-init-instructions")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> GetNamesForInitialInstructions()
         {
-            if (departmentId == -1)
-            {
-                Console.WriteLine("Не найден отдел! проверь FindNewEmployeeAndCreateInitialInstruction");
-                return null;
-            }
-
-            string? connectionString = null;
-            switch (departmentId)
-            {
-                case 1: //Общестроительный отдел
-                    connectionString = "DefaultConnectionForGeneralConstructionDepartment";
-                    break;
-                case 2: //Техничесский отдел
-                    connectionString = "DefaultConnectionForTechnicalDepartment";
-                    break;
-                default:
-                    Console.WriteLine("Что за отдел? Непонятно. Проверь функцию FindNewEmployeeAndCreateInitialInstruction");
-                    return null;
-            }
-            return null; // TODO: Продолжить! чтобы можно было закончить с вводными инструткажами.
-
-
-
+            return await GetNamesForInitialInstructionsInternal();
         }
 
-        
+        private async Task<IActionResult> GetNamesForInitialInstructionsInternal()
+        {
+            return Ok();
+        }
 
         public class UserTemp
         {
@@ -1030,15 +1145,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             string _connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
 
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            using (Microsoft.Data.SqlClient.SqlConnection connection = new Microsoft.Data.SqlClient.SqlConnection(_connectionString))
             {
                 await connection.OpenAsync();
 
-                using (SqlCommand command = new SqlCommand(query, connection))
+                using (Microsoft.Data.SqlClient.SqlCommand command = new Microsoft.Data.SqlClient.SqlCommand(query, connection))
                 {
                     command.Parameters.AddWithValue("@Username", username);
 
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    using (Microsoft.Data.SqlClient.SqlDataReader reader = await command.ExecuteReaderAsync())
                     {
                         if (await reader.ReadAsync())
                         {

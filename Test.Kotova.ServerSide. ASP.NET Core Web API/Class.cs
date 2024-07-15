@@ -32,6 +32,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Data.Common;
 
 
+
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 class DBProcessor
 {
@@ -681,7 +682,7 @@ class DBProcessor
         return (names, birthDates);
     }
 
-    private async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int instructionId, SqlConnection connection, SqlTransaction transaction)
+    public async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int instructionId, SqlConnection connection, SqlTransaction transaction)
     {
         try
         {
