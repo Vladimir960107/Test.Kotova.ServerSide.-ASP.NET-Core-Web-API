@@ -16,5 +16,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
     {
         public string username { get; set; }
         public string password { get; set;}
+        public int time_for_being_authenticated { get; set; }
+
     }
 }

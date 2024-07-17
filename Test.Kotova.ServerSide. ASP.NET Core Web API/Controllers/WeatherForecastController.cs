@@ -122,6 +122,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 return NotFound("Instruction was not found in DB!");
             }
+            
         }
 
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser, int departmentId)
@@ -1146,6 +1147,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 return BadRequest($"user under name {model.username} wasn't found");
             }
+            if (model.time_for_being_authenticated <= 0)
+            {
+                return BadRequest("time for being authenticated was not correct, type valid time");
+            }
             
             (bool?,User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
@@ -1168,7 +1173,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     };
 
                     string secret = _configuration["JwtConfig:Secret"]; // Remember to store this securely and not hardcode in production
-                    var token = GenerateJwtToken(claims, secret);
+                    var token = GenerateJwtToken(claims, secret, model.time_for_being_authenticated);
 
                     return Ok(new { Token = token, Message = "User authenticated successfully." });
                 }
@@ -1351,7 +1356,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             return false;
         }
-        public string GenerateJwtToken(List<Claim> claims, string secret)
+        public string GenerateJwtToken(List<Claim> claims, string secret, int timeForExpiration)
         {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -1360,7 +1365,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 issuer: "yourdomain.com",
                 audience: "yourdomain.com",
                 claims: claims,
-                expires: DateTime.Now.AddMinutes(30),
+                expires: DateTime.Now.AddMinutes(timeForExpiration),
                 signingCredentials: creds);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
