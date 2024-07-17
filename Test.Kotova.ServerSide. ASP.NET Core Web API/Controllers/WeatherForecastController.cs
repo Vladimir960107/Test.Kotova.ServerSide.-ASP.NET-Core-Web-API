@@ -37,7 +37,7 @@ using System.Transactions;
 using System.Data.SqlClient;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
-{       
+{
     [ApiController]
     [Route("[controller]")]
     public class InstructionsController : ControllerBase
@@ -94,7 +94,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         [Authorize]
         [HttpPost("instruction_is_passed_by_user")] // Здесь нужна(или не нужна?) кодировка вместо Dictionary - string, которая зашифрована.!!!!!!!!
-        public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary) 
+        public async Task<IActionResult> sendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary)
         {
             string jsonString = System.Text.Json.JsonSerializer.Serialize(jsonDictionary);
 
@@ -103,7 +103,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Dictionary is empty or null on server side");
             }
             Dictionary<string, object> dictionaryOfInstruction = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(jsonString); //supress the warning.
-            
+
             if (dictionaryOfInstruction.IsNullOrEmpty())
             {
                 return BadRequest("Dictionary is empty or null on server side");
@@ -113,7 +113,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
             int departmentId = await GetDepartmentIdFromUserName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
-            
+
             if (await passInstructionIntoDb(dictionaryOfInstruction, tableNameForUser, departmentId))
             {
                 return Ok("Instruction Is passed, information added to Database");
@@ -164,13 +164,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     int rowCount = 0;
                     using (var reader = await command.ExecuteReaderAsync())
                     {
-                        
+
                         while (await reader.ReadAsync())
                         {
                             rowCount++;
                         }
 
-                        
+
                     }
                     if (rowCount == 1)
                     {
@@ -317,11 +317,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpGet("download-newest")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public IActionResult DownloadNewestFile()
-        {    
+        {
             try
             {
                 Response.Headers.Add("X-Content-Type-Options", "nosniff"); // FOR SECURITY
-                string filePath = GetNewestExcelFilePath(); 
+                string filePath = GetNewestExcelFilePath();
                 string mimeType = Path.GetExtension(filePath).ToLowerInvariant() switch
                 {
                     ".xls" => "application/vnd.ms-excel",
@@ -781,7 +781,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             UserTemp newUser = new UserTemp(someInfoAboutNewUser[0], someInfoAboutNewUser[1], someInfoAboutNewUser[2], someInfoAboutNewUser[3], _dataService);
 
-            bool isNeededToCreateInitialInstruction = someInfoAboutNewUser[4] == "True"; 
+            bool isNeededToCreateInitialInstruction = someInfoAboutNewUser[4] == "True";
 
             try
             {
@@ -937,8 +937,68 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<IActionResult> GetNamesForInitialInstructionsInternal()
         {
-            return Ok();
+            List<ApplicationDBContextBase> dbContexts = DownloadListOfDBContextFromDB();
+            List<InstructionDto> results = new List<InstructionDto>();
+            List<string> errors = new List<string>();
+
+            foreach (ApplicationDBContextBase dbContext in dbContexts)
+            {
+                var instructions = await dbContext.Instructions
+                                                  .Where(i => EF.Functions.Like(i.cause_of_instruction, "Вводный инструктаж для %"))
+                                                  .ToListAsync();
+
+                foreach (var instruction in instructions)
+                {
+                    string? personnelNumber = instruction.cause_of_instruction.ExtractTenDigitNumber();
+                    if (string.IsNullOrEmpty(personnelNumber))
+                    {
+                        errors.Add($"Не удалось извлечь 10-значный номер из: {instruction.cause_of_instruction}");
+                        continue;
+                    }
+
+                    var employee = await dbContext.Department_employees
+                        .Where(e => e.personnel_number == personnelNumber)
+                        .Select(e => new Employee
+                        {
+                            full_name = e.full_name,
+                            birth_date = e.birth_date
+                        })
+                        .FirstOrDefaultAsync();
+                    if (employee == null)
+                    {
+                        errors.Add($"Не найден сотрудник с персональным номером: {personnelNumber}");
+                        continue;
+                    }
+
+                    results.Add(new InstructionDto
+                    {
+                        InstructionId = instruction.instruction_id,
+                        TenDigitNumber = personnelNumber,
+                        Name = employee.full_name,
+                        BirthDate = employee.birth_date
+                    });
+                }
+            }
+
+            if (errors.Any())
+            {
+                return BadRequest(new { Errors = errors });
+            }
+
+            return Ok(results);
         }
+
+        private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
+        {
+            List<ApplicationDBContextBase> dbContexts = new List<ApplicationDBContextBase>();
+            dbContexts.Add(_contextGeneralConstr);
+            dbContexts.Add(_contextTechnicalDepartment);
+            // Add some other stuff if needed :)
+
+            return dbContexts;
+        }
+
+
 
         public class UserTemp
         {

@@ -744,4 +744,13 @@ class DBProcessor
 
 }
 
+public static class InstructionExtensions
+{
+    public static string? ExtractTenDigitNumber(this string causeOfInstruction)
+    {
+        var match = Regex.Match(causeOfInstruction, @"Вводный инструктаж для (\d{10})");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+}
+
 
