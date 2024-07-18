@@ -65,6 +65,7 @@ class DBProcessor
     public const string columnName_sql_pos_users_PN = "current_personnel_number";
 
     public const string tableName_sql_USER_instruction_id = "instruction_id";
+    public const string tableName_sql_USER_instruction_type = "type_of_instruction";
     public const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
     public const string tableName_sql_USER_datePassed = "date_when_passed";
     public const string tableName_sql_User_datePassed_UTCTime = "date_when_passed_UTC_Time";

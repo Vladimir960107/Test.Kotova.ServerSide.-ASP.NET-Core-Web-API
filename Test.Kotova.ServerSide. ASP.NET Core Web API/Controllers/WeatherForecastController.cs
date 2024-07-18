@@ -141,12 +141,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             string dateWhenPassed = DBProcessor.tableName_sql_USER_datePassed;
             string dateWhenPassedUTCTime = DBProcessor.tableName_sql_User_datePassed_UTCTime;
+            string instructionTypeColumn = DBProcessor.tableName_sql_USER_instruction_type;
 
             //string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
-            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions} //TODO Разблокируй следующую строку, где GETUTCDATE()
+            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions}
             string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
                     SET [{isPassedColumn}] = 1,
-                       /* [{dateWhenPassedUTCTime}] = GETUTCDATE(), Разблокируй эту строку, в Production-е, только проверь, что всё работает после этого :) */
+                        [{dateWhenPassedUTCTime}] = GETUTCDATE(),
                         [{dateWhenPassed}] = GETDATE()           
                     WHERE [{instructionIdColumn}] = @instructionId";
 
@@ -162,19 +163,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     param.ParameterName = "@value";
                     param.Value = ConvertJsonElement(jsonDictionary[columnName]);
                     command.Parameters.Add(param);
+
                     int rowCount = 0;
+                    int instructionId = 0;
+                    int typeOfInstruction = -1;
+
                     using (var reader = await command.ExecuteReaderAsync())
                     {
-
                         while (await reader.ReadAsync())
                         {
                             rowCount++;
+                            instructionId = reader.GetInt32(reader.GetOrdinal(instructionIdColumn));
+                            typeOfInstruction = reader.GetByte(reader.GetOrdinal(instructionTypeColumn));
                         }
-
-
                     }
+
                     if (rowCount == 1)
                     {
+                        if (typeOfInstruction == 0)
+                        {
+                            Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");//TODO: Отправить начальнику уведомление о создании вводного инструктажа для такого-то человека! Вводный инструктаж пройден
+                        }
                         // Close the reader before executing the update query
                         command.Parameters.Clear(); // Clear previous parameters
 
@@ -182,7 +191,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         command.CommandText = sqlQueryChangePassedVariable;
                         DbParameter instructionIdParam = command.CreateParameter();
                         instructionIdParam.ParameterName = "@instructionId";
-                        instructionIdParam.Value = ConvertJsonElement(jsonDictionary[DBProcessor.tableName_sql_USER_instruction_id]); // Replace "instructionIdKey" with the actual key from jsonDictionary that corresponds to the instruction ID
+                        instructionIdParam.Value = instructionId;
                         command.Parameters.Add(instructionIdParam);
 
                         int rowsAffected = await command.ExecuteNonQueryAsync();
@@ -999,7 +1008,132 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return dbContexts;
         }
 
+        [HttpGet("get-not-passed-instructions-for-chief")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetNotPassedInstructionForChief()
+        {
 
+            var username = User.FindFirst(ClaimTypes.Name)?.Value;
+            if (string.IsNullOrEmpty(username))
+            {
+                return Unauthorized("username для данного начальника не найден");
+            }
+
+            int departmentId = await GetDepartmentIdFromUserName(username);
+
+            var dbContext = GetDbContextForDepartment(departmentId);
+            if (dbContext == null)
+            {
+                return NotFound("для данного начальника не найден отдел! (GetNotPassedInstructionForChief)");
+            }
+
+            bool isCheckedFine = await CheckPassingTheInstructionsBeforeReturningTheData(dbContext);
+            if (!isCheckedFine)
+            {
+                return BadRequest("Упс, что-то пошло не так в CheckPassingTheInstructionsByChief, проверь!");
+            }
+            else
+            {
+                return Ok();
+            }
+        }
+        private static async Task<int> ExecuteScalarAsync(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
+        {
+            using (var command = dbContext.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = sql;
+                if (command.Connection.State == System.Data.ConnectionState.Closed)
+                {
+                    await command.Connection.OpenAsync();
+                }
+
+                foreach (var parameter in parameters)
+                {
+                    command.Parameters.Add(parameter);
+                }
+
+                var result = await command.ExecuteScalarAsync();
+                return Convert.ToInt32(result);
+            }
+        }
+
+
+        private static async Task<bool> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext)
+        {
+            var instructionsToCheck = await dbContext.Instructions
+                .Where(i => !i.is_passed_by_everyone)
+                .ToListAsync();
+
+            if (!instructionsToCheck.Any())
+            {
+                Console.WriteLine("No instructions to check.");
+                return true;
+            }
+
+            try
+            {
+                var tenDigitTables = dbContext.GetTenDigitTableNames();
+                //Console.WriteLine($"Found {tenDigitTables.Count} ten-digit tables.");
+
+                foreach (var instruction in instructionsToCheck)
+                {
+                    int instructionId = instruction.instruction_id;
+                    //Console.WriteLine($"Checking instructionId = {instructionId}");
+
+                    List<string> instructionIsNotPassedByListOfPeople = new List<string>();
+                    List<string> instructionIsPassedByListOfPeople = new List<string>();
+
+                    foreach (var tableName in tenDigitTables)
+                    {
+                        Console.WriteLine($"Querying table {tableName} for instructionId = {instructionId}");
+
+                        var sqlQuery = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 0";
+                        var result = await ExecuteScalarAsync(dbContext, sqlQuery, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+                        //Console.WriteLine($"Result for is_instruction_passed = 0 in table {tableName}: {result}");
+
+                        if (result > 0)
+                        {
+                            instructionIsNotPassedByListOfPeople.Add(tableName);
+                            //Console.WriteLine($"{tableName}: Instruction not passed: {instructionId}");
+                        }
+                        else
+                        {
+                            var sqlQuery2 = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 1";
+                            var result2 = await ExecuteScalarAsync(dbContext, sqlQuery2, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+                            //Console.WriteLine($"Result for is_instruction_passed = 1 in table {tableName}: {result2}");
+
+                            if (result2 > 0)
+                            {
+                                instructionIsPassedByListOfPeople.Add(tableName);
+                                //Console.WriteLine($"{tableName}: Instruction passed: {instructionId}");
+                            }
+                        }
+                    }
+
+                    if (!instructionIsNotPassedByListOfPeople.Any() && instructionIsPassedByListOfPeople.Any())
+                    {
+                        var instructionToUpdate = await dbContext.Instructions
+                            .FirstOrDefaultAsync(i => i.instruction_id == instructionId);
+
+                        if (instructionToUpdate != null)
+                        {
+                            instructionToUpdate.is_passed_by_everyone = true;
+                            dbContext.Instructions.Update(instructionToUpdate);
+                            await dbContext.SaveChangesAsync();
+                            //Console.WriteLine($"Updated instruction {instructionId} to passed by everyone.");
+                        }
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("An error occurred: " + ex.Message);
+                Console.WriteLine(ex);
+                return false;
+            }
+        }
 
         public class UserTemp
         {
