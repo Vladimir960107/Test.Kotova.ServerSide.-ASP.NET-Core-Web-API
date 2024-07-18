@@ -1027,16 +1027,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return NotFound("дл€ данного начальника не найден отдел! (GetNotPassedInstructionForChief)");
             }
 
-            bool isCheckedFine = await CheckPassingTheInstructionsBeforeReturningTheData(dbContext);
-            if (!isCheckedFine)
-            {
-                return BadRequest("”пс, что-то пошло не так в CheckPassingTheInstructionsByChief, проверь!");
-            }
-            else
-            {
-                return Ok();
-            }
+            return await CheckPassingTheInstructionsBeforeReturningTheData(dbContext);
         }
+
+        
+
         private static async Task<int> ExecuteScalarAsync(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
         {
             using (var command = dbContext.Database.GetDbConnection().CreateCommand())
@@ -1058,16 +1053,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
 
-        private static async Task<bool> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext)
+        private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext)
         {
             var instructionsToCheck = await dbContext.Instructions
                 .Where(i => !i.is_passed_by_everyone)
                 .ToListAsync();
-
+            List<InstructionForChief> instructionsForChiefList = new List<InstructionForChief>();
             if (!instructionsToCheck.Any())
             {
                 Console.WriteLine("No instructions to check.");
-                return true;
+                return Ok(instructionsForChiefList); //Will return empty List
             }
 
             try
@@ -1075,9 +1070,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 var tenDigitTables = dbContext.GetTenDigitTableNames();
                 //Console.WriteLine($"Found {tenDigitTables.Count} ten-digit tables.");
 
-                foreach (var instruction in instructionsToCheck)
+                foreach (var instructionToCheck in instructionsToCheck)
                 {
-                    int instructionId = instruction.instruction_id;
+                    int instructionId = instructionToCheck.instruction_id;
                     //Console.WriteLine($"Checking instructionId = {instructionId}");
 
                     List<string> instructionIsNotPassedByListOfPeople = new List<string>();
@@ -1120,18 +1115,41 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             instructionToUpdate.is_passed_by_everyone = true;
                             dbContext.Instructions.Update(instructionToUpdate);
                             await dbContext.SaveChangesAsync();
+                            continue;
                             //Console.WriteLine($"Updated instruction {instructionId} to passed by everyone.");
                         }
+                        
                     }
+                    var persons = instructionIsNotPassedByListOfPeople.Select(name => new InstructionForChief.PersonStatus
+                    {
+                        PersonName = name,
+                        Passed = false
+                    }).Concat(instructionIsPassedByListOfPeople.Select(name => new InstructionForChief.PersonStatus
+                    {
+                        PersonName = name,
+                        Passed = true
+                    })).ToList();
+
+                    InstructionForChief instructionForChief = new InstructionForChief()
+                    {
+                        InstructionId = instructionId,
+                        BeginDate = instructionToCheck.begin_date,
+                        EndDate = instructionToCheck.end_date,
+                        CauseOfInstruction = instructionToCheck.cause_of_instruction,
+                        TypeOfInstruction = instructionToCheck.cause_of_instruction,
+                        Persons = persons,
+                    };
+                    instructionsForChiefList.Add(instructionForChief);
+
                 }
 
-                return true;
+                return Ok(instructionsForChiefList);
             }
             catch (Exception ex)
             {
                 Console.WriteLine("An error occurred: " + ex.Message);
                 Console.WriteLine(ex);
-                return false;
+                return BadRequest("”пс, что-то пошло не так в CheckPassingTheInstructionsByChief, проверь!");
             }
         }
 
