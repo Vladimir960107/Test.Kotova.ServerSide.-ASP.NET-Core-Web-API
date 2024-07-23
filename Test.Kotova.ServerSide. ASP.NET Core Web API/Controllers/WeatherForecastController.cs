@@ -1062,7 +1062,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             if (!instructionsToCheck.Any())
             {
                 Console.WriteLine("No instructions to check.");
-                return Ok(instructionsForChiefList); //Will return empty List
+                var instructionsForChiefList_Serialized = JsonConvert.SerializeObject(instructionsForChiefList);
+                return Ok(instructionsForChiefList_Serialized); //Will return empty List
             }
 
             try
@@ -1120,15 +1121,21 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         }
                         
                     }
-                    var persons = instructionIsNotPassedByListOfPeople.Select(name => new InstructionForChief.PersonStatus
+
+                    var persons = instructionIsNotPassedByListOfPeople.Select(personnelNumber => new InstructionForChief.PersonStatus
                     {
-                        PersonName = name,
+                        PersonnelNumber = personnelNumber,
+                        PersonName = null,
                         Passed = false
-                    }).Concat(instructionIsPassedByListOfPeople.Select(name => new InstructionForChief.PersonStatus
+                    }).Concat(instructionIsPassedByListOfPeople.Select(personnelNumber => new InstructionForChief.PersonStatus
                     {
-                        PersonName = name,
+                        PersonnelNumber = personnelNumber,
+                        PersonName = null,
                         Passed = true
                     })).ToList();
+
+                    
+
 
                     InstructionForChief instructionForChief = new InstructionForChief()
                     {
@@ -1142,8 +1149,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     instructionsForChiefList.Add(instructionForChief);
 
                 }
-
-                return Ok(instructionsForChiefList);
+                var instructionsForChiefList_Serialized = JsonConvert.SerializeObject(instructionsForChiefList);
+                return Ok(instructionsForChiefList_Serialized);
             }
             catch (Exception ex)
             {

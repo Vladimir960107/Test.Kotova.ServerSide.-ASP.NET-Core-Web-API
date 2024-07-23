@@ -1,7 +1,11 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
 using System.Data.SqlClient;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+using System.Timers;
+using Microsoft.Extensions.Configuration;
+
+
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 {
@@ -79,7 +83,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         {
             string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
                $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue, " +
-               $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @CurrentDateTime "+
+               $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @CurrentDateTime " +
                $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
             using (var connection = new SqlConnection(_connectionString))
             {
@@ -173,58 +177,118 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                 }
             }
         }
-
-
-        /*private async Task DelayAndUpdateAsync(int chiefId)
-        {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(60));
-
-                await UpdateChiefSessionAsyncToAnotherValue(chiefId);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to set to false Chief session for Chief ID {chiefId}: {ex}");
-            }
-        }*/
-
-
-        /*public bool IsChiefOnline(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                return sessions[chiefId].IsChiefOnline;
-            }
-            return false;
-
-        }*/
-
-        
-
-        /*public void EndChiefSession(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                sessions[chiefId].EndSession();
-                sessions.Remove(chiefId);
-            }
-        }*/
-
-        /*public void PingChief(int chiefId)
-        {
-            if (sessions.ContainsKey(chiefId))
-            {
-                sessions[chiefId].ChiefPinged();
-            }
-            else
-            {
-                // If chief is not already registered, register and ping
-                var session = new ChiefSession(chiefId);
-                sessions.Add(chiefId, session);
-                session.ChiefPinged();
-            }
-        }*/
-
     }
 }
+
+
+/*namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
+{
+    public class ChiefsManager //TODO: НИФИГА НЕ РАБОТАЕТ! ПЕРЕИСПРАВЛЯЙ :)
+    {
+        private readonly string _connectionString;
+        private readonly ConcurrentDictionary<int, System.Timers.Timer> _timers;
+
+        public ChiefsManager(IConfiguration configuration)
+        {
+            _connectionString = configuration.GetConnectionString("DefaultConnectionForUsers");
+            _timers = new ConcurrentDictionary<int, System.Timers.Timer>();
+        }
+
+        public async Task PingChiefAsync(int chiefId)
+        {
+            await UpdateChiefStatusAsync(chiefId, true);
+            ScheduleOfflineCheck(chiefId);
+        }
+
+        private void ScheduleOfflineCheck(int chiefId)
+        {
+            if (_timers.TryGetValue(chiefId, out var existingTimer))
+            {
+                existingTimer.Stop();
+                existingTimer.Dispose();
+            }
+
+            var timer = new System.Timers.Timer(60000); // 60 seconds
+            timer.Elapsed += async (sender, e) => await TimerElapsedAsync(chiefId);
+            timer.AutoReset = false;
+            timer.Start();
+
+            _timers[chiefId] = timer;
+        }
+
+        private async Task TimerElapsedAsync(int chiefId)
+        {
+            await CheckAndSetOfflineStatusAsync(chiefId);
+            _timers.TryRemove(chiefId, out _); // Remove the timer once the check is done
+        }
+
+        public async Task CheckAndSetOfflineStatusAsync(int chiefId)
+        {
+            Console.WriteLine($"Setting chief offline status: {chiefId}");
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var currentTime = DateTime.UtcNow;
+                string query = $"SELECT {DBProcessor.tableName_sql_lastOnlineSetUTC} " +
+                               $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
+                               $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
+
+                var command = new SqlCommand(query, connection);
+                command.Parameters.AddWithValue("@ChiefId", chiefId);
+
+                await connection.OpenAsync();
+                var result = await command.ExecuteScalarAsync();
+
+                if (result != null && result != DBNull.Value)
+                {
+                    var lastPingTime = (DateTime)result;
+                    if ((currentTime - lastPingTime).TotalSeconds >= 60)
+                    {
+                        await UpdateChiefStatusAsync(chiefId, false);
+                    }
+                }
+            }
+        }
+
+        private async Task UpdateChiefStatusAsync(int chiefId, bool isOnline)
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
+                               $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue, " +
+                               $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @LastPingTime " +
+                               $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
+                var command = new SqlCommand(query, connection);
+                command.Parameters.AddWithValue("@NewValue", isOnline);
+                command.Parameters.AddWithValue("@LastPingTime", DateTime.UtcNow);
+                command.Parameters.AddWithValue("@ChiefId", chiefId);
+
+                await connection.OpenAsync();
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+
+        public async Task<bool> IsChiefOnlineAsync(int chiefId)
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                string query = $"SELECT {DBProcessor.tableName_sql_isChiefOnline} " +
+                            $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
+                            $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
+                var command = new SqlCommand(query, connection);
+                command.Parameters.AddWithValue("@ChiefId", chiefId);
+
+                await connection.OpenAsync();
+                var result = await command.ExecuteScalarAsync();
+
+                if (result != null && result != DBNull.Value)
+                {
+                    return (bool)result;
+                }
+                else
+                {
+                    return false; // or handle as appropriate
+                }
+            }
+        }
+    }
+}*/
