@@ -80,6 +80,8 @@ builder.Services.AddDbContext<ApplicationDBContextGeneralConstr>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment")));
 builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
+builder.Services.AddDbContext<ApplicationDBContextManagement>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForManagement")));
 
 builder.Services.AddSingleton<ChiefsManager>();
 builder.Services.AddSingleton<IHostedService, GracefulShutdownService>();

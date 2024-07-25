@@ -46,15 +46,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private readonly ApplicationDBContextGeneralConstr _contextGeneralConstr;
         private readonly ApplicationDbContextUsers _userContext;
         private readonly ApplicationDBContextTechnicalDepartment _contextTechnicalDepartment;
+        private readonly ApplicationDBContextManagement _contextManagement;
         private List<bool> ChiefsAreOnline = new List<bool>();
 
-        public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment)
+        public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment, ApplicationDBContextManagement contextManagement)
         {
 
             _dataService = dataService;
             _contextGeneralConstr = contextGeneralConstr;
             _userContext = userContext;
             _contextTechnicalDepartment = contextTechnicalDepartment;
+            _contextManagement = contextManagement;
+
         }
 
         [Authorize]
@@ -128,7 +131,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser, int departmentId)
         {
 
-            string? connectionString = _dataService._configuration.GetConnectionString(GetConnectionStringNameByDepartmentId(departmentId));
+            string connectionString = GetConnectionStringByDepartmentId(departmentId);
 
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
             optionsBuilder.UseSqlServer(connectionString);
@@ -365,7 +368,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
 
                 int departmentId = await GetDepartmentIdFromUserName(username);
-                string? connectionString = configuration.GetConnectionString(GetConnectionStringNameByDepartmentId(departmentId));
+                string? connectionString = GetConnectionStringByDepartmentId(departmentId);
 
                 if (string.IsNullOrEmpty(connectionString))
                 {
@@ -381,17 +384,35 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest($"An error occurred while processing your request: {ex.Message}");
             }
         }
-        private string? GetConnectionStringNameByDepartmentId(int departmentId)
+
+        private string GetConnectionStringByDepartmentId(int departmentId)
         {
             switch (departmentId)
             {
                 case 1:
-                    return "DefaultConnectionForGeneralConstructionDepartment";
+                    return _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
                 case 2:
-                    return "DefaultConnectionForTechnicalDepartment";
+                    return _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
+                case 5:
+                    return _dataService._configuration.GetConnectionString("DefaultConnectionForManagement");
                 default:
                     return null;
-            };
+            }
+        }
+
+        private ApplicationDBContextBase GetDbContextForDepartment(int departmentId)
+        {
+            switch (departmentId)
+            {
+                case 1:
+                    return _contextGeneralConstr;
+                case 2:
+                    return _contextTechnicalDepartment;
+                case 5:
+                    return _contextManagement;
+                default:
+                    return null;
+            }
         }
 
         [HttpGet("sync-instructions-with-db")] //Make this load every 1 minute or something.!!!!!
@@ -407,18 +428,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 List<Instruction> instructions = new List<Instruction>();
                 int departmentId = await GetDepartmentIdFromUserName(username);
-                switch (departmentId)
+                var dbContext = GetDbContextForDepartment(departmentId);
+                if (dbContext == null) 
                 {
-                    case 1:
-                        instructions = await _contextGeneralConstr.Instructions.ToListAsync();
-                        break;
-                    case 2:
-                        instructions = await _contextTechnicalDepartment.Instructions.ToListAsync();
-                        break;
-                    case -1:
-                    default:
-                        return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                    return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
+                instructions = await dbContext.Instructions.ToListAsync();  
                 var serialized = JsonConvert.SerializeObject(instructions);
                 var encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
@@ -487,31 +502,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
 
-        private string GetConnectionStringByDepartmentId(int departmentId)
-        {
-            switch (departmentId)
-            {
-                case 1:
-                    return _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment");
-                case 2:
-                    return _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
-                default:
-                    return null;
-            }
-        }
-
-        private ApplicationDBContextBase GetDbContextForDepartment(int departmentId)
-        {
-            switch (departmentId)
-            {
-                case 1:
-                    return _contextGeneralConstr;
-                case 2:
-                    return _contextTechnicalDepartment;
-                default:
-                    return null;
-            }
-        }
+        
 
         private async Task<string> DecryptAsync(string encryptedData)
         {
@@ -613,18 +604,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 instruction.begin_date = DateTime.UtcNow;
 
                 int departmentId = await GetDepartmentIdFromUserName(username);
-                switch (departmentId)
+                var dbContext = GetDbContextForDepartment(departmentId);
+                if (dbContext == null) 
                 {
-                    case 1:
-                        await SaveInstructionWithFilePaths(_contextGeneralConstr, instruction, pathsOfFilePath);
-                        break;
-                    case 2:
-                        await SaveInstructionWithFilePaths(_contextTechnicalDepartment, instruction, pathsOfFilePath);
-                        break;
-                    case -1:
-                    default:
-                        return (false, null, "Not Implemented case in function AddNewInstructionInternal, check for error there");
+                    return (false, null, "Not Implemented case in function AddNewInstructionInternal, check for error there");
                 }
+                await SaveInstructionWithFilePaths(dbContext, instruction, pathsOfFilePath);
 
                 return (true, instruction, null);
             }
@@ -725,6 +710,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             ApplicationDBContextBase context;
+
             switch (newcomer.department)
             {
                 case "ќбщестроительный отдел":
@@ -1032,7 +1018,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         
 
-        private static async Task<int> ExecuteScalarAsync(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
+        private static async Task<int> ExecuteScalarAsyncInt(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
         {
             using (var command = dbContext.Database.GetDbConnection().CreateCommand())
             {
@@ -1052,6 +1038,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        private static async Task<string> ExecuteScalarAsyncString(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
+        {
+            using (var command = dbContext.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = sql;
+                if (command.Connection.State == System.Data.ConnectionState.Closed)
+                {
+                    await command.Connection.OpenAsync();
+                }
+
+                foreach (var parameter in parameters)
+                {
+                    command.Parameters.Add(parameter);
+                }
+
+                var result = await command.ExecuteScalarAsync();
+                return result.ToString();
+            }
+        }
+
 
         private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext)
         {
@@ -1059,57 +1065,61 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 .Where(i => !i.is_passed_by_everyone)
                 .ToListAsync();
             List<InstructionForChief> instructionsForChiefList = new List<InstructionForChief>();
+
             if (!instructionsToCheck.Any())
             {
                 Console.WriteLine("No instructions to check.");
                 var instructionsForChiefList_Serialized = JsonConvert.SerializeObject(instructionsForChiefList);
-                return Ok(instructionsForChiefList_Serialized); //Will return empty List
+                return Ok(instructionsForChiefList_Serialized); // Will return empty List
             }
 
             try
             {
                 var tenDigitTables = dbContext.GetTenDigitTableNames();
-                //Console.WriteLine($"Found {tenDigitTables.Count} ten-digit tables.");
 
                 foreach (var instructionToCheck in instructionsToCheck)
                 {
                     int instructionId = instructionToCheck.instruction_id;
-                    //Console.WriteLine($"Checking instructionId = {instructionId}");
 
-                    List<string> instructionIsNotPassedByListOfPeople = new List<string>();
-                    List<string> instructionIsPassedByListOfPeople = new List<string>();
+                    List<(string personnelNumber, string personName)> instructionIsNotPassedByListOfPeople = new List<(string, string)>();
+                    List<(string personnelNumber, string personName)> instructionIsPassedByListOfPeople = new List<(string, string)>();
 
-                    foreach (var tableName in tenDigitTables)
+                    foreach (string? tableName in tenDigitTables)
                     {
-                        Console.WriteLine($"Querying table {tableName} for instructionId = {instructionId}");
+                        if (string.IsNullOrEmpty(tableName))
+                        {
+                            Console.WriteLine("Table name is null or empty.");
+                            continue;
+                        }
 
                         var sqlQuery = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 0";
-                        var result = await ExecuteScalarAsync(dbContext, sqlQuery, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
-                        //Console.WriteLine($"Result for is_instruction_passed = 0 in table {tableName}: {result}");
+                        var result = await ExecuteScalarAsyncInt(dbContext, sqlQuery, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+
+                        var sqlQueryToRecieveFullName = $"SELECT full_name FROM [{DBProcessor.tableName_sql_MainName.Split(".")[1]}] WHERE [personnel_number] = @PN";
+                        var resultFullName = await ExecuteScalarAsyncString(dbContext, sqlQueryToRecieveFullName, new Microsoft.Data.SqlClient.SqlParameter("@PN", tableName));
 
                         if (result > 0)
                         {
-                            instructionIsNotPassedByListOfPeople.Add(tableName);
-                            //Console.WriteLine($"{tableName}: Instruction not passed: {instructionId}");
+                            instructionIsNotPassedByListOfPeople.Add((tableName, resultFullName));
                         }
                         else
                         {
                             var sqlQuery2 = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 1";
-                            var result2 = await ExecuteScalarAsync(dbContext, sqlQuery2, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
-                            //Console.WriteLine($"Result for is_instruction_passed = 1 in table {tableName}: {result2}");
+                            var result2 = await ExecuteScalarAsyncInt(dbContext, sqlQuery2, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+
+                            var sqlQueryToRecieveFullName2 = $"SELECT full_name FROM [{DBProcessor.tableName_sql_MainName.Split(".")[1]}] WHERE [personnel_number] = @PN";
+                            var resultFullName2 = await ExecuteScalarAsyncString(dbContext, sqlQueryToRecieveFullName2, new Microsoft.Data.SqlClient.SqlParameter("@PN", tableName));
 
                             if (result2 > 0)
                             {
-                                instructionIsPassedByListOfPeople.Add(tableName);
-                                //Console.WriteLine($"{tableName}: Instruction passed: {instructionId}");
+                                instructionIsPassedByListOfPeople.Add((tableName, resultFullName2));
                             }
                         }
                     }
 
                     if (!instructionIsNotPassedByListOfPeople.Any() && instructionIsPassedByListOfPeople.Any())
                     {
-                        var instructionToUpdate = await dbContext.Instructions
-                            .FirstOrDefaultAsync(i => i.instruction_id == instructionId);
+                        var instructionToUpdate = await dbContext.Instructions.FirstOrDefaultAsync(i => i.instruction_id == instructionId);
 
                         if (instructionToUpdate != null)
                         {
@@ -1117,25 +1127,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             dbContext.Instructions.Update(instructionToUpdate);
                             await dbContext.SaveChangesAsync();
                             continue;
-                            //Console.WriteLine($"Updated instruction {instructionId} to passed by everyone.");
                         }
-                        
                     }
 
-                    var persons = instructionIsNotPassedByListOfPeople.Select(personnelNumber => new InstructionForChief.PersonStatus
+                    var persons = instructionIsNotPassedByListOfPeople.Select(p => new InstructionForChief.PersonStatus
                     {
-                        PersonnelNumber = personnelNumber,
-                        PersonName = null,
+                        PersonnelNumber = p.personnelNumber,
+                        PersonName = p.personName,
                         Passed = false
-                    }).Concat(instructionIsPassedByListOfPeople.Select(personnelNumber => new InstructionForChief.PersonStatus
+                    }).Concat(instructionIsPassedByListOfPeople.Select(p => new InstructionForChief.PersonStatus
                     {
-                        PersonnelNumber = personnelNumber,
-                        PersonName = null,
+                        PersonnelNumber = p.personnelNumber,
+                        PersonName = p.personName,
                         Passed = true
                     })).ToList();
-
-                    
-
 
                     InstructionForChief instructionForChief = new InstructionForChief()
                     {
@@ -1146,9 +1151,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         TypeOfInstruction = instructionToCheck.cause_of_instruction,
                         Persons = persons,
                     };
-                    instructionsForChiefList.Add(instructionForChief);
 
+                    instructionsForChiefList.Add(instructionForChief);
                 }
+
                 var instructionsForChiefList_Serialized = JsonConvert.SerializeObject(instructionsForChiefList);
                 return Ok(instructionsForChiefList_Serialized);
             }
@@ -1159,6 +1165,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("”пс, что-то пошло не так в CheckPassingTheInstructionsByChief, проверь!");
             }
         }
+
 
         public class UserTemp
         {
@@ -1179,7 +1186,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 _dataService = dataService;
 
                 Random random = new Random();
-                int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number for User
+                int randomNumber = random.Next(1000000, 9999999); // Generates a 7-digit number for User TODO: IF RANDOM NUMBER GENERATES THE SAME - CHECK THAT AND REGENERATE AGAIN UNTIL IT WILL GENERATE NEW ONE!
                 Login = $"User{randomNumber}";
                 Password = Login;
                 HashedPassword = Encryption_Kotova.HashPassword(Password);

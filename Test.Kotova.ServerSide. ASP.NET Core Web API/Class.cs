@@ -64,6 +64,7 @@ class DBProcessor
     public const string columnName_sql_pos_users_username = "username";
     public const string columnName_sql_pos_users_PN = "current_personnel_number";
 
+    public const string tableName_sql_User_is_assigned_to_people = "is_assigned_to_people";
     public const string tableName_sql_USER_instruction_id = "instruction_id";
     public const string tableName_sql_USER_instruction_type = "type_of_instruction";
     public const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
@@ -573,6 +574,12 @@ class DBProcessor
                             return false;
                             
                         }
+                        if (!(await AssignedToPeopleIsTrueOrDoesntExist(instructionId, connection,transaction)))
+                        {
+                            Console.WriteLine("Failed to execute is_assigned_to_people to true for some reason");
+                            transaction.Rollback();
+                            return false;
+                        }
                         int instructionId_NonNull = instructionId ?? default(int);
 
                         List<string> personelNumbers = await FindPNsOfNamesAndBirthDates(package.NamesAndBirthDates, connection, transaction);
@@ -607,6 +614,45 @@ class DBProcessor
             Console.WriteLine(ex.ToString());
             return false;
         }
+    }
+
+    private async Task<bool> AssignedToPeopleIsTrueOrDoesntExist(int? instructionId, SqlConnection connection, SqlTransaction transaction)
+    {
+        bool isSuccess = false;
+        try
+        {
+            string updateQuery = @$"
+                    UPDATE {tableName_Instructions_sql}
+                    SET {tableName_sql_User_is_assigned_to_people} = 1
+                    WHERE {tableName_sql_USER_instruction_id} = @InstructionId";
+
+            using (SqlCommand command = new SqlCommand(updateQuery, connection, transaction))
+            {
+                command.Parameters.AddWithValue("@InstructionId", instructionId);
+
+                int rowsAffected = command.ExecuteNonQuery();
+
+                if (rowsAffected == 0)
+                {
+                    isSuccess = false;
+                }
+                else if (rowsAffected == 1)
+                {
+                    isSuccess = true;
+                }
+                else
+                {
+                    throw new Exception("Multiple rows affected.");
+                }
+            }
+            return isSuccess;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("An error occurred: " + ex.Message);
+            return false;
+        }
+
     }
 
     public async Task<int?> FindInstructionIdAsync(string? instructionCause, SqlConnection connection, SqlTransaction transaction)

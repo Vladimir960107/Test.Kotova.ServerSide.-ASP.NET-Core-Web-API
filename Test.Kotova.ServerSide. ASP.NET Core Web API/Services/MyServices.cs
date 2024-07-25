@@ -57,6 +57,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                 case (2):
                     connectionString = _configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment");
                     break;
+                case (5):
+                    connectionString = _configuration.GetConnectionString("DefaultConnectionForManagement");
+                    break;
                 default:
                     break;
             }
