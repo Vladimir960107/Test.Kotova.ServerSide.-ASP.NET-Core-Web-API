@@ -719,6 +719,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 case "Технический отдел":
                     context = _contextTechnicalDepartment;
                     break;
+                case "Начальство":
+                    context = _contextManagement;
+                    break;
                 default:
                     return BadRequest("Invalid department");
             }
@@ -845,6 +848,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     begin_date = DateTime.UtcNow,
                     end_date = DateTime.UtcNow.AddMonths(1),
                     path_to_instruction = null,
+                    is_assigned_to_people = true, //TODO, это должно выполняться после того как инструктаж направлен человеку! А не здесь.
                     type_of_instruction = 0, // 0 represents Вводный инструктаж
                 };
 
@@ -1228,6 +1232,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         return 1;
                     case "Технический отдел":
                         return 2;
+                    case "Начальство":
+                        return 5;
                     default:
                         return -1;
                 }
