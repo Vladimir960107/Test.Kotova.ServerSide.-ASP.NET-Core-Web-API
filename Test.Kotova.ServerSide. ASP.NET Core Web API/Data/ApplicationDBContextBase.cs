@@ -25,6 +25,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .Property(i => i.instruction_id)
                 .ValueGeneratedOnAdd();
 
+            modelBuilder.Entity<Employee>()
+            .HasKey(e => e.personnel_number);
+
             modelBuilder.Entity<FilePath>()
                 .HasKey(fp => fp.path_id);
 

@@ -35,6 +35,7 @@ using System.Timers;
 using System.Transactions;
 
 using System.Data.SqlClient;
+using Department = Kotova.CommonClasses.Department;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -646,9 +647,50 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             return user.department_id;
         }
+        [HttpGet("download-list-of-all-departments-and-employees")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> DownloadListOfDepartmentsAndEmployeesFromDB()
+        {
+            return await DownloadListOfDepartmentsAndEmployeesFromDBInternal();
+        }
+
+        private async Task<IActionResult> DownloadListOfDepartmentsAndEmployeesFromDBInternal()
+        {
+            try
+            {
+                var departments = await _userContext.Departments.ToListAsync();
+                if (departments.Count == 0)
+                {
+                    //return something that shows that there are no departments.
+                }
+                List<Dept> deptList = new List<Dept>();
+                foreach (var department in departments)
+                {
+                    using (var dbContext = GetDbContextForDepartment(department.department_id))
+                    {
+                        Dept new_dept = new Dept();
+                        new_dept.Name = department.department_name;
+
+                        // Fetch employees for the current department
+                        new_dept.Employees = await dbContext.Department_employees
+                                                            .ToListAsync();
+
+                        deptList.Add(new_dept);
+
+
+                    }
+                }
+                    string deptListSerialized = JsonConvert.SerializeObject(deptList);
+                return Ok(deptListSerialized);
+            }
+            catch
+            {
+                return StatusCode(500, "Internal Server Error: Could not retrieve departments.");
+            }
+        }
 
         [HttpGet("download-list-of-departments")]
-        [Authorize(Roles = "Coordinator, Administrator")]
+        [Authorize(Roles = "Coordinator, Management, Administrator")]
         public async Task<IActionResult> DownloadListOfDepartmentsFromDB()
         {
             try
