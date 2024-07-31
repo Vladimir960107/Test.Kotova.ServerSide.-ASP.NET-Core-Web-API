@@ -1527,31 +1527,45 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
             {
-                var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
-                if (newUserExistInDB != null)
+                using (var transaction = await context.Database.BeginTransactionAsync())
                 {
-                    return BadRequest("username is already taken/exist in DB");
-                }
+                    try
+                    {
+                        var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
+                        if (newUserExistInDB != null)
+                        {
+                            return BadRequest("username is already taken/exist in DB");
+                        }
 
-                // Fetch the user from the database
-                var userToUpdate = await context.Users.FirstOrDefaultAsync(u => u.username == user);
+                        // Fetch the user from the database
+                        var userToUpdate = await context.Users.FirstOrDefaultAsync(u => u.username == user);
 
-                if (userToUpdate != null)
-                {
-                    // Update user details
-                    userToUpdate.username = credentials.Login;
-                    userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
-                    userToUpdate.current_email = credentials.Email;
+                        if (userToUpdate != null)
+                        {
+                            // Update user details
+                            userToUpdate.username = credentials.Login;
+                            userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
+                            userToUpdate.current_email = credentials.Email;
 
-                    await context.SaveChangesAsync();
-                    return Ok();
-                }
-                else
-                {
-                    throw new Exception("User not found");
+                            await context.SaveChangesAsync();
+                            await transaction.CommitAsync();
+                            return Ok();
+                        }
+                        else
+                        {
+                            throw new Exception("User not found");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        Console.WriteLine($"An error occurred: {ex.Message}");
+                        return StatusCode(500, "Internal server error. Please try again later.");
+                    }
                 }
             }
         }
+
 
         [Authorize]
         [HttpGet("securedata")]
