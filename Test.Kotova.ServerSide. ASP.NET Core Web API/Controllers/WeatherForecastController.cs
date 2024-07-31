@@ -131,7 +131,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<bool> passInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser, int departmentId)
         {
-
             string connectionString = GetConnectionStringByDepartmentId(departmentId);
 
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
@@ -140,80 +139,99 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string tableName = DBProcessor.tableName_Instructions_sql;
             string columnName = DBProcessor.tableName_sql_INSTRUCTIONS_cause;
 
-            string instructionIdColumn = DBProcessor.tableName_sql_USER_instruction_id; // The column name for instruction ID in the user table
-            string isPassedColumn = DBProcessor.tableName_sql_USER_is_instruction_passed; // The column name for isPassed in the user table
+            string instructionIdColumn = DBProcessor.tableName_sql_USER_instruction_id; 
+            string isPassedColumn = DBProcessor.tableName_sql_USER_is_instruction_passed; 
 
             string dateWhenPassed = DBProcessor.tableName_sql_USER_datePassed;
             string dateWhenPassedUTCTime = DBProcessor.tableName_sql_User_datePassed_UTCTime;
             string instructionTypeColumn = DBProcessor.tableName_sql_USER_instruction_type;
 
-            //string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
-            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value"; // here {tableName.Split('.')[1]} == {Instructions}
+            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
             string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
-                    SET [{isPassedColumn}] = 1,
-                        [{dateWhenPassedUTCTime}] = GETUTCDATE(),
-                        [{dateWhenPassed}] = GETDATE()           
-                    WHERE [{instructionIdColumn}] = @instructionId";
+            SET [{isPassedColumn}] = 1,
+                [{dateWhenPassedUTCTime}] = GETUTCDATE(),
+                [{dateWhenPassed}] = GETDATE()           
+            WHERE [{instructionIdColumn}] = @instructionId";
 
             using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
             {
                 var conn = context.Database.GetDbConnection();
                 await conn.OpenAsync();
-
-                using (var command = conn.CreateCommand())
+                using (var transaction = conn.BeginTransaction())
                 {
-                    command.CommandText = sqlQuery;
-                    DbParameter param = command.CreateParameter();
-                    param.ParameterName = "@value";
-                    param.Value = ConvertJsonElement(jsonDictionary[columnName]);
-                    command.Parameters.Add(param);
-
-                    int rowCount = 0;
-                    int instructionId = 0;
-                    int typeOfInstruction = -1;
-
-                    using (var reader = await command.ExecuteReaderAsync())
+                    try
                     {
-                        while (await reader.ReadAsync())
+                        using (var command = conn.CreateCommand())
                         {
-                            rowCount++;
-                            instructionId = reader.GetInt32(reader.GetOrdinal(instructionIdColumn));
-                            typeOfInstruction = reader.GetByte(reader.GetOrdinal(instructionTypeColumn));
+                            command.Transaction = transaction;
+                            command.CommandText = sqlQuery;
+                            DbParameter param = command.CreateParameter();
+                            param.ParameterName = "@value";
+                            param.Value = ConvertJsonElement(jsonDictionary[columnName]);
+                            command.Parameters.Add(param);
+
+                            int rowCount = 0;
+                            int instructionId = 0;
+                            int typeOfInstruction = -1;
+
+                            using (var reader = await command.ExecuteReaderAsync())
+                            {
+                                while (await reader.ReadAsync())
+                                {
+                                    rowCount++;
+                                    instructionId = reader.GetInt32(reader.GetOrdinal(instructionIdColumn));
+                                    typeOfInstruction = reader.GetByte(reader.GetOrdinal(instructionTypeColumn));
+                                }
+                            }
+
+                            if (rowCount == 1)
+                            {
+                                if (typeOfInstruction == 0)
+                                {
+                                    Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");//TODO: Отправить начальнику уведомление о создании вводного инструктажа для такого-то человека! Вводный инструктаж пройден
+                                }
+                                command.Parameters.Clear(); 
+
+                                command.CommandText = sqlQueryChangePassedVariable;
+                                DbParameter instructionIdParam = command.CreateParameter();
+                                instructionIdParam.ParameterName = "@instructionId";
+                                instructionIdParam.Value = instructionId;
+                                command.Parameters.Add(instructionIdParam);
+
+                                int rowsAffected = await command.ExecuteNonQueryAsync();
+                                if (rowsAffected > 0)
+                                {
+                                    transaction.Commit();
+                                    return true;
+                                }
+                                else
+                                {
+                                    transaction.Rollback();
+                                    return false;
+                                }
+                            }
+                            else if (rowCount > 1)
+                            {
+                                throw new Exception("Instructions with the same cause name were found in multiple quantities!");
+                            }
+                            else
+                            {
+                                Console.WriteLine("No rows matched the criteria.");
+                                transaction.Rollback();
+                                return false;
+                            }
                         }
                     }
-
-                    if (rowCount == 1)
+                    catch (Exception ex)
                     {
-                        if (typeOfInstruction == 0)
-                        {
-                            Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");//TODO: Отправить начальнику уведомление о создании вводного инструктажа для такого-то человека! Вводный инструктаж пройден
-                        }
-                        // Close the reader before executing the update query
-                        command.Parameters.Clear(); // Clear previous parameters
-
-                        // Setting up and executing the update query
-                        command.CommandText = sqlQueryChangePassedVariable;
-                        DbParameter instructionIdParam = command.CreateParameter();
-                        instructionIdParam.ParameterName = "@instructionId";
-                        instructionIdParam.Value = instructionId;
-                        command.Parameters.Add(instructionIdParam);
-
-                        int rowsAffected = await command.ExecuteNonQueryAsync();
-                        return rowsAffected > 0;
-                    }
-                    else if (rowCount > 1)
-                    {
-                        throw new Exception("Instructions with the same cause name were found in multiple quantities!");
-                    }
-                    else
-                    {
-                        Console.WriteLine("No rows matched the criteria.");
+                        Console.WriteLine($"An error occurred: {ex.Message}");
+                        transaction.Rollback();
                         return false;
                     }
                 }
-
             }
         }
+
 
         private static object ConvertJsonElement(object value)
         {
@@ -457,6 +475,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         private async Task<IActionResult> SendInstructionAndNamesInternal(InstructionPackage package, string? username)
         {
+
+            string? personnelNumberOfSignedBy = await _dataService.UserNameToTableName(username);
+
             if (package == null)
             {
                 return BadRequest("Empty or null encrypted payload is not acceptable.");
@@ -484,7 +505,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 DBProcessor example = new DBProcessor(connectionString);
                 // Here you would include any logic to process the package, e.g., storing it in a database asynchronously
-                bool result = await example.ProcessDataAsync(package);
+                bool result = await example.ProcessDataAsync(package, personnelNumberOfSignedBy);
                 if (result)
                 {
                     return Ok($"Received and processed successfully: {package.InstructionCause} instructions with {package.NamesAndBirthDates.Count} names.");
@@ -919,6 +940,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<bool> AssignNewInstructionToUser(FullCustomInstruction fullCustomInstruction, int? departmentId, string personnelNumber)
         {
+
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? personnelNumberOfSignedBy = await _dataService.UserNameToTableName(userName);
+
             if (departmentId == null) return false;
             int departmentIdNotNull = departmentId.Value;
 
@@ -943,7 +968,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                             DBProcessor dBProcessor = new DBProcessor(connectionString);
                             // Call the SendNotificationToPeopleAsync method to send the notification
-                            var isNotificationSent = await dBProcessor.SendNotificationToPeopleAsync(personnelNumbers, instructionId, connection, transaction);
+                            var isNotificationSent = await dBProcessor.SendNotificationToPeopleAsync(personnelNumbers, instructionId, connection, transaction, personnelNumberOfSignedBy);
 
                             if (!isNotificationSent)
                             {

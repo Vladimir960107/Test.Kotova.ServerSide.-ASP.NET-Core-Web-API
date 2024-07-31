@@ -30,6 +30,8 @@ using Microsoft.Extensions.Configuration;
 using System.Linq.Expressions;
 using Microsoft.AspNetCore.Mvc;
 using System.Data.Common;
+using System.Security.Claims;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 
 
 
@@ -73,6 +75,7 @@ class DBProcessor
     public const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
     public const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
     public const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
+    public const string tableName_sql_USER_instr_was_signed_by_PN = "was_signed_by_PN";
 
     public const string birthDate_format = "yyyy-MM-dd";
 
@@ -238,7 +241,8 @@ class DBProcessor
                     {tableName_sql_USER_datePassed} DATETIME,
                     {tableName_sql_User_datePassed_UTCTime} DATETIME,
                     {tableName_sql_USER_whenWasSendByHeadOfDepartment} DATETIME,
-                    {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME
+                    {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime} DATETIME,
+                    {tableName_sql_USER_instr_was_signed_by_PN} CHAR(10)
                 )')
             END"
             ;
@@ -555,7 +559,7 @@ class DBProcessor
         }
     }
     
-    public async Task<bool> ProcessDataAsync(InstructionPackage package) 
+    public async Task<bool> ProcessDataAsync(InstructionPackage package, string PNOfSignedBy) 
     {
         try
         {
@@ -589,7 +593,7 @@ class DBProcessor
                             transaction.Rollback();
                             return false;
                         }
-                        var isEverythingFine = await SendNotificationToPeopleAsync(personelNumbers, instructionId_NonNull, connection, transaction);
+                        var isEverythingFine = await SendNotificationToPeopleAsync(personelNumbers, instructionId_NonNull, connection, transaction, PNOfSignedBy);
 
                         if (!isEverythingFine) 
                         {
@@ -729,17 +733,20 @@ class DBProcessor
         return (names, birthDates);
     }
 
-    public async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int instructionId, SqlConnection connection, SqlTransaction transaction)
+    public async Task<bool> SendNotificationToPeopleAsync(List<string> personelNumbers, int instructionId, SqlConnection connection, SqlTransaction transaction, string personnelNumberOfSignedBy)
     {
         try
         {
             foreach (string personelNumber in personelNumbers)
             {
+
+                
+
                 string tableName = $"[dbo].[{personelNumber}]";
                 //Console.WriteLine(personelNumber);
                 string query = $"INSERT INTO {tableName} ({tableName_sql_USER_instruction_id}, {tableName_sql_USER_is_instruction_passed}, " +
-                    $"{tableName_sql_USER_whenWasSendByHeadOfDepartment}, {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime})" +
-                    $" VALUES(@instructionId, @falseValue,@whenWasSendToUser, @whenWasSendToUserUTC)";
+                    $"{tableName_sql_USER_whenWasSendByHeadOfDepartment}, {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime}, {tableName_sql_USER_instr_was_signed_by_PN})" +
+                    $" VALUES(@instructionId, @falseValue,@whenWasSendToUser, @whenWasSendToUserUTC, @PNOfSignedBy)";
 
                 if (connection.State != System.Data.ConnectionState.Open)
                 {
@@ -752,8 +759,10 @@ class DBProcessor
                     command.Parameters.AddWithValue("@falseValue", false);
                     command.Parameters.AddWithValue("@whenWasSendToUser", DateTime.Now);
                     command.Parameters.AddWithValue("@whenWasSendToUserUTC", DateTime.UtcNow);
+                    command.Parameters.AddWithValue("@PNOfSignedBy", personnelNumberOfSignedBy);
                     await command.ExecuteNonQueryAsync();
                 }
+                //await connection.CloseAsync();//TODO: CHECK WHETHER THIS LINE IS NEEDED! or simple close instead of closeasync?
             }
             return true;
         }
