@@ -37,6 +37,8 @@ using System.Transactions;
 using System.Data.SqlClient;
 using Department = Kotova.CommonClasses.Department;
 
+//Movig to schema in databases after that
+
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
     [ApiController]
