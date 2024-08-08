@@ -64,17 +64,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [Authorize]
-        [HttpGet("greeting")]
+        [HttpGet("greeting")] //»—œ–¿¬À≈ÕŒ
         public IActionResult GetGreeting()
         {
             return Ok("Hello, World!");
         }
 
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        [HttpGet("get-department-id-by/{userName}")]
+        [HttpGet("get-department-id-by/{userName}")]  //»—œ–¿¬À≈ÕŒ
         public async Task<IActionResult> GetDepartmentIdByUserNameURL(string userName)
         {
-            int? departmentId = await _dataService.GetDepartmentIdByUserName(userName);
+            var departmentId = await _userContext.Users
+                   .Where(u => u.username == userName)
+                   .Select(u => u.department_id)
+                   .FirstOrDefaultAsync();
             if (departmentId == null)
             {
                 return BadRequest("departmentId wasn't found by userName");
@@ -83,13 +86,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [Authorize]
-        [HttpGet("get_instructions_for_user")]
+        [HttpGet("get_instructions_for_user")]  
         public async Task<IActionResult> GetNotifications()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? tableNameForUser = await _dataService.UserNameToTableName(userName);
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
-            int? departmentId = await _dataService.GetDepartmentIdByUserName(userName);
+            int? departmentId = await _userContext.Users
+                   .Where(u => u.username == userName)
+                   .Select(u => u.department_id)
+                   .FirstOrDefaultAsync();
             if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
             object whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
             string serialized = JsonConvert.SerializeObject(whatever);
@@ -662,24 +668,17 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("download-list-of-departments")]
+        [HttpGet("download-list-of-departments")] //»—œ–¿¬À≈ÕŒ
         [Authorize(Roles = "Coordinator, Management, Administrator")]
         public async Task<IActionResult> DownloadListOfDepartmentsFromDB()
         {
             try
             {
-                var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-                optionsBuilder.UseSqlServer(connectionString);
+                var departmentNames = await _userContext.Departments
+                    .Select(dept => dept.department_name)
+                    .ToListAsync();
 
-                using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
-                {
-                    var departmentNames = await context.Departments
-                                                  .Select(dept => dept.department_name)
-                                                  .ToListAsync();
-
-                    return Ok(departmentNames);
-                }
+                return Ok(departmentNames);
             }
             catch (Exception ex)
             {
@@ -687,24 +686,17 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("get-roles-for-newcomer")]
+        [HttpGet("get-roles-for-newcomer")] //»—œ–¿¬À≈ÕŒ
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> DownloadListOfRolesFromDB()
         {
             try
             {
-                var connectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-                optionsBuilder.UseSqlServer(connectionString);
+                var roleTypes = await _userContext.Roles
+                    .Select(role => role.roletype)
+                    .ToListAsync();
 
-                using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
-                {
-                    var roleTypes = await context.Roles
-                                                  .Select(role => role.roletype)
-                                                  .ToListAsync();
-
-                    return Ok(roleTypes);
-                }
+                return Ok(roleTypes);
             }
             catch (Exception ex)
             {
@@ -1284,14 +1276,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
-            User userTemp = await GetUserByUsername(model.username);
+            var userTemp = await _context.Users.FirstOrDefaultAsync(u => u.username == model.username);
             if (userTemp == null)
             {
-                return BadRequest($"user under name {model.username} wasn't found");
+                return BadRequest($"User with username {model.username} wasn't found");
             }
             if (model.time_for_being_authenticated <= 0)
             {
-                return BadRequest("time for being authenticated was not correct, type valid time");
+                return BadRequest("Time for being authenticated was not correct, type valid time");
             }
 
             (bool?, User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
@@ -1299,12 +1291,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
                 {
-                    return CustomForbid("Current department already have Chief Authenticated. Ask him to close application and then after 1 minute - open your application.");
+                    return CustomForbid("Current department already has a Chief Authenticated. Ask them to close the application and then after 1 minute, open your application.");
                 }
 
                 try
                 {
-                    User? user = authenticationModel.Item2;
+                    var user = authenticationModel.Item2;
                     var claims = new List<Claim>
                     {
                         new Claim(ClaimTypes.Name, model.username),
@@ -1320,11 +1312,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return BadRequest(ex.Message);
                 }
-
             }
             else if (authenticationModel.Item1 == null)
             {
-                return Unauthorized("User doesn't have personnel number yet, wait when you gonna have personnel number");
+                return Unauthorized("User doesn't have a personnel number yet, wait until you receive a personnel number");
             }
             else
             {
@@ -1341,60 +1332,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return result;
         }
 
-        private async Task<User> GetUserByUsername(string username)
-        {
-            User user = null;
-
-            string query = "SELECT * FROM Users WHERE Username = @Username";
-
-            string _connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-
-            using (Microsoft.Data.SqlClient.SqlConnection connection = new Microsoft.Data.SqlClient.SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-
-                using (Microsoft.Data.SqlClient.SqlCommand command = new Microsoft.Data.SqlClient.SqlCommand(query, connection))
-                {
-                    command.Parameters.AddWithValue("@Username", username);
-
-                    using (Microsoft.Data.SqlClient.SqlDataReader reader = await command.ExecuteReaderAsync())
-                    {
-                        if (await reader.ReadAsync())
-                        {
-                            user = new User
-                            {
-                                username = reader["username"].ToString(),
-                                password_hash = reader["password_hash"].ToString(),
-                                user_role = reader.GetInt32(reader.GetOrdinal("user_role")),
-                                current_personnel_number = reader["current_personnel_number"].ToString(),
-                                current_email = reader["current_email"].ToString(),
-                                department_id = reader.GetInt32(reader.GetOrdinal("department_id")),
-                                desk_number = reader["desk_number"].ToString(),
-                            };
-                        }
-                    }
-                }
-            }
-
-            return user;
-        }
-
         [HttpPatch]
         [Route("change_credentials")]
         [Authorize]
         public async Task<IActionResult> ChangeCredentials([FromBody] UserCredentials credentials)
         {
             var authorizationHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
-            string? jwtToken = authorizationHeader?.StartsWith("Bearer ") == true ? authorizationHeader.Substring("Bearer ".Length).Trim() : null;
-            if (jwtToken == null || jwtToken.Length == 0)
+            string jwtToken = authorizationHeader?.StartsWith("Bearer ") == true ? authorizationHeader.Substring("Bearer ".Length).Trim() : null;
+            if (string.IsNullOrEmpty(jwtToken))
             {
                 return BadRequest("JWT token is null or empty");
             }
-            string? user = User.FindFirst(ClaimTypes.Name)?.Value;
+            string user = User.FindFirst(ClaimTypes.Name)?.Value;
             if (string.IsNullOrWhiteSpace(user))
             {
-                return BadRequest("user is null or empty");
+                return BadRequest("User is null or empty");
             }
+
             CredentialValidation credentialValidation = new CredentialValidation();
             if (credentialValidation.CheckForValidation(credentials, user))
             {
@@ -1404,56 +1358,49 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 catch
                 {
-                    return BadRequest("Couldn't update the user credentials in DB");
+                    return BadRequest("Couldn't update the user credentials in the database");
                 }
             }
             else
             {
-                return BadRequest("checkForValidation returned false");
+                return BadRequest("CheckForValidation returned false");
             }
         }
 
         private async Task<IActionResult> UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
         {
-            var connectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-            optionsBuilder.UseSqlServer(connectionString);
-
-            using (var context = new ApplicationDbContextUsers(optionsBuilder.Options))
+            using (var transaction = await _context.Database.BeginTransactionAsync())
             {
-                using (var transaction = await context.Database.BeginTransactionAsync())
+                try
                 {
-                    try
+                    var newUserExistInDB = await _context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
+                    if (newUserExistInDB != null)
                     {
-                        var newUserExistInDB = await context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
-                        if (newUserExistInDB != null)
-                        {
-                            return BadRequest("username is already taken/exist in DB");
-                        }
-
-                        var userToUpdate = await context.Users.FirstOrDefaultAsync(u => u.username == user);
-
-                        if (userToUpdate != null)
-                        {
-                            userToUpdate.username = credentials.Login;
-                            userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
-                            userToUpdate.current_email = credentials.Email;
-
-                            await context.SaveChangesAsync();
-                            await transaction.CommitAsync();
-                            return Ok();
-                        }
-                        else
-                        {
-                            throw new Exception("User not found");
-                        }
+                        return BadRequest("Username is already taken or exists in the database");
                     }
-                    catch (Exception ex)
+
+                    var userToUpdate = await _context.Users.FirstOrDefaultAsync(u => u.username == user);
+
+                    if (userToUpdate != null)
                     {
-                        await transaction.RollbackAsync();
-                        Console.WriteLine($"An error occurred: {ex.Message}");
-                        return StatusCode(500, "Internal server error. Please try again later.");
+                        userToUpdate.username = credentials.Login;
+                        userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
+                        userToUpdate.current_email = credentials.Email;
+
+                        await _context.SaveChangesAsync();
+                        await transaction.CommitAsync();
+                        return Ok();
                     }
+                    else
+                    {
+                        throw new Exception("User not found");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    Console.WriteLine($"An error occurred: {ex.Message}");
+                    return StatusCode(500, "Internal server error. Please try again later.");
                 }
             }
         }
@@ -1474,7 +1421,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 3 => "Coordinator",
                 4 => "Management",
                 5 => "Administrator",
-                _ => throw new ArgumentException($"user_role:{user_role} is not valid, something is wrong!")
+                _ => throw new ArgumentException($"User role: {user_role} is not valid, something is wrong!")
             };
         }
 
@@ -1483,6 +1430,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string pattern = @"^\d{10}$";
             return Regex.IsMatch(input, pattern);
         }
+
         public string GenerateJwtToken(List<Claim> claims, string secret, int timeForExpiration)
         {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));

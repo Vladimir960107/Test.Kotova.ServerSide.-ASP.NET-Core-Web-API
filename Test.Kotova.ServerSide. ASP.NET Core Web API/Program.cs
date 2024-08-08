@@ -75,13 +75,13 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddDbContext<ApplicationDbContextUsers>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForUsers")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 builder.Services.AddDbContext<ApplicationDBContextGeneralConstr>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 builder.Services.AddDbContext<ApplicationDBContextManagement>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionForManagement")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 
 builder.Services.AddSingleton<ChiefsManager>();
 builder.Services.AddSingleton<IHostedService, GracefulShutdownService>();

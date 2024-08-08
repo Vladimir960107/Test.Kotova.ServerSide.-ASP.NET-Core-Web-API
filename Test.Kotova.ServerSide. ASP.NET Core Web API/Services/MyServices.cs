@@ -161,38 +161,5 @@ WHERE
                 Result2 = result2
             };
         }
-
-        internal async Task<int?> GetDepartmentIdByUserName(string userName)
-        {
-            var temporaryConnectionString = _configuration.GetConnectionString("DefaultConnectionForUsers");
-            var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-            temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
-            using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
-            {
-                var conn = context.Database.GetDbConnection();
-                await conn.OpenAsync();
-                using (var command = conn.CreateCommand())
-                {
-
-                    command.CommandText = $"SELECT {DBProcessor.tableName_sql_departmentId} FROM [{DBProcessor.tableName_pos_users}] WHERE {DBProcessor.columnName_sql_pos_users_username} = @UserName";
-                    command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@UserName", SqlDbType.VarChar) { Value = userName });
-
-                    using (var reader = await command.ExecuteReaderAsync())
-                    {
-                        if (await reader.ReadAsync())
-                        {
-                            if (!reader.IsDBNull(0))
-                            {
-                                int departmentId = reader.GetInt32(0);
-                                return departmentId;
-                            }
-                                
-                        }
-
-                    }
-                }
-            }
-            return null;
-        }
     }
 }
