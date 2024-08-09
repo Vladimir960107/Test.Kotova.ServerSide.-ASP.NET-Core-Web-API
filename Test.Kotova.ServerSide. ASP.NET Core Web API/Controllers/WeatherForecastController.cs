@@ -36,6 +36,7 @@ using System.Transactions;
 
 using System.Data.SqlClient;
 using Department = Kotova.CommonClasses.Department;
+using System.ComponentModel.DataAnnotations;
 
 //Movig to schema in databases after that
 
@@ -45,6 +46,44 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     [Route("[controller]")]
     public class InstructionsController : ControllerBase
     {
+
+        public const double DEVIATION = 0.00001;
+        public const double maxFileSizeForExcel = 10 * 1024 * 1024; // Maximum file excel size (10 MB).
+        public const string tableName_sql_index = "index";
+        public const string tableName_sql_names = "full_name";
+        public const string tableName_sql_jobPosition = "job_position";
+        public const string tableName_sql_isDriver = "is_driver";
+        public const string tableName_sql_BirthDate = "birth_date";
+        public const string tableName_sql_gender = "gender";
+        public const string tableName_sql_PN = "personnel_number";
+        public const string tableName_sql_department = "department";
+        public const string tableName_sql_departmentId = "department_id";
+        public const string tableName_sql_isChiefOnline = "is_chief_online";
+        public const string tableName_sql_lastOnlineSetUTC = "last_online_set_UTC";
+        public const string tableName_sql_group = "group";
+        public const string tableName_sql_departments_NameDB = "dbo.departments";
+        public const string tableName_sql_MainName = "dbo.Department_employees";
+        public const string tableName_Instructions_sql = "dbo.Instructions";
+        public const string connectionString_server = "localhost";
+        public const string connectionString_database = "TestDB";
+        public const string tableName_pos_users = "users";
+        public const string columnName_sql_pos_users_username = "username";
+        public const string columnName_sql_pos_users_PN = "current_personnel_number";
+        public const string tableName_sql_User_is_assigned_to_people = "is_assigned_to_people";
+        public const string tableName_sql_USER_instruction_id = "instruction_id";
+        public const string tableName_sql_USER_instruction_type = "type_of_instruction";
+        public const string tableName_sql_USER_is_instruction_passed = "is_instruction_passed";
+        public const string tableName_sql_USER_datePassed = "date_when_passed";
+        public const string tableName_sql_User_datePassed_UTCTime = "date_when_passed_UTC_Time";
+        public const string tableName_sql_INSTRUCTIONS_cause = "cause_of_instruction";
+        public const string tableName_sql_USER_whenWasSendByHeadOfDepartment = "when_was_send_to_user";
+        public const string tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime = "when_was_send_to_user_UTC_Time";
+        public const string tableName_sql_USER_instr_was_signed_by_PN = "was_signed_by_PN";
+        public const string birthDate_format = "yyyy-MM-dd";
+
+
+
+
         private readonly MyDataService _dataService;
         private readonly ApplicationDBContextGeneralConstr _contextGeneralConstr;
         private readonly ApplicationDbContextUsers _userContext;
@@ -62,6 +101,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _contextManagement = contextManagement;
 
         }
+
 
         [Authorize]
         [HttpGet("greeting")] //ИСПРАВЛЕНО
@@ -86,22 +126,92 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [Authorize]
-        [HttpGet("get_instructions_for_user")]  
+        [HttpGet("get_instructions_for_user")]  //ИСПРАЛВЕНО, НО НЕ ПРОВЕРЕНО ЧТО ФУНКЦИЯ РАБОТАЕТ КОГДА ЕСТЬ ИНСТРУКТАЖИ!
         public async Task<IActionResult> GetNotifications()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string? tableNameForUser = await _dataService.UserNameToTableName(userName);
+            string? tableNameForUser = await _userContext.Users
+                .Where(u => u.username == userName)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
             if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
             int? departmentId = await _userContext.Users
                    .Where(u => u.username == userName)
                    .Select(u => u.department_id)
                    .FirstOrDefaultAsync();
             if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
-            object whatever = await _dataService.ReadDataFromDynamicTable(tableNameForUser, departmentId);
+            int departmentIdNotNull = (int)departmentId;
+            object whatever = await ReadDataFromDynamicTable(tableNameForUser, departmentIdNotNull);
             string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
             return Ok(encryptedData);
         }
+
+        private async Task<object> ReadDataFromDynamicTable(string tableName, int departmentId)
+        {
+            // Determine the correct DbContext based on departmentId
+            // Determine the correct DbContext based on departmentId
+            var context = GetDbContextForDepartment(departmentId);
+            if (context == null)
+            {
+                throw new ArgumentException("Invalid departmentId");
+            }
+
+            if (!Regex.IsMatch(tableName, @"^\d{10}$")) // Ensure the tableName is a valid 10-digit number
+            {
+                throw new ArgumentException("Invalid table name");
+            }
+            string schemaName = GetSchemaName(departmentId);
+
+            // Step 1: Retrieve matching instruction IDs and `when_was_send_to_user` from the dynamic table
+            var dynamicTableQuery = $"SELECT * FROM [{schemaName}].[{tableName}] WHERE is_instruction_passed = 0";
+            var dynamicInstructions = await context.Set<DynamicEmployeeInstruction>()
+                .FromSqlRaw(dynamicTableQuery)
+                .ToListAsync();
+
+            var instructionIds = dynamicInstructions.Select(di => di.instruction_id).ToList();
+            var whenWasSentMap = dynamicInstructions.ToDictionary(di => di.instruction_id, di => di.when_was_send_to_user);
+
+            // Step 2: Fetch instructions using these IDs
+            var result1 = await context.Instructions
+                .Where(i => instructionIds.Contains(i.instruction_id))
+                .Select(i => new Dictionary<string, object>
+                {
+            { "ID", i.instruction_id },
+            { "instruction_id", i.instruction_id },
+            { "when_was_send_to_user", whenWasSentMap.ContainsKey(i.instruction_id) ? whenWasSentMap[i.instruction_id] : null },
+            { "path_to_instruction", i.path_to_instruction },
+            { "cause_of_instruction", i.cause_of_instruction },
+            { "type_of_instruction", i.type_of_instruction }
+                })
+                .ToListAsync();
+
+            var result2 = await context.FilePaths
+                .Where(fp => instructionIds.Contains(fp.instruction_id))
+                .Select(fp => new Dictionary<string, object>
+                {
+            { "instruction_id", fp.instruction_id },
+            { "file_path", fp.file_path }
+                })
+                .ToListAsync();
+
+            return new QueryResult
+            {
+                Result1 = result1,
+                Result2 = result2
+            };
+        }
+        private string GetSchemaName(int departmentId)
+        {
+            return departmentId switch
+            {
+                1 => "GeneralConstructionDep",
+                2 => "TechnicalDep",
+                5 => "Management",
+                _ => "dbo" // Default schema
+            };
+        }
+
 
         [Authorize]
         [HttpPost("instruction_is_passed_by_user")]
@@ -380,6 +490,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return BadRequest("Connection string is not configured for the provided department ID.");
                 }
+
 
                 DBProcessor dbProcessor = new DBProcessor(connectionString);
                 List<Tuple<string, string>> namesAndBirthDates = await dbProcessor.GetNamesAsync();
@@ -704,7 +815,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpPost("insert-new-employee")]
+        [HttpPost("insert-new-employee")] //ИСПРАВЛЕНО!
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> InsertNewcomerIntoDb([FromBody] Employee newcomer)
         {
@@ -727,30 +838,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     context = _contextManagement;
                     break;
                 default:
-                    return BadRequest("Invalid department");
+                    return BadRequest("Недопустимый отдел!");
             }
 
             bool employeeExists = await context.Department_employees
                 .AnyAsync(e => e.personnel_number == newcomer.personnel_number);
-            bool tablePNExists = await DoesTableExistAsync(context, newcomer.personnel_number);
+            string? schema = await _userContext.Departments
+                .Where(dept => dept.department_name == newcomer.department)
+                .Select(dept => dept.department_schema)
+                .FirstOrDefaultAsync();
+            if (schema == null) { return BadRequest("schema не найдена, проверьте данную строчку на сервере!"); }
+            bool tablePNExists = await DoesTableExistAsync(context, newcomer.personnel_number, schema);
 
             if (employeeExists)
             {
-                return BadRequest("An employee with the same PersonnelNumber already exists.");
+                return BadRequest("Сотрудник с таким же табельным номером уже существует на предприятии");
             }
             if (tablePNExists)
             {
-                return BadRequest("A table with the same PersonnelNumber already exists.");
+                return BadRequest("Сотрудник с таким же табельным номером уже существует в отделе.");
             }
-
             try
             {
-                string connectionString = context.Database.GetDbConnection().ConnectionString;
-                await DBProcessor.CreateTableDIAsync(newcomer.personnel_number, connectionString);
+                await DBProcessor.CreateTableDIAsync(newcomer.personnel_number, context, schema);
             }
             catch (Exception ex)
             {
-                return BadRequest($"A table with new personnel number can't be created: {ex.Message}");
+                return BadRequest($"Таблица с таким табельным номером не может быть создана: {ex.Message}");
             }
 
             context.Department_employees.Add(newcomer);
@@ -758,29 +872,38 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             if (rowsAffected > 0)
             {
-                return Ok("Employee inserted into DB");
+                return Ok("Сотрудник добавлен в базу данных!");
             }
-            return BadRequest("Something went wrong, employee not inserted. Check InsertNewcomerIntoDb.");
+            return BadRequest("Что-то пошло не так, сотрудник не занесён в базу данных. Проверь InsertNewcomerIntoDb.");
         }
 
-        private async Task<bool> DoesTableExistAsync<TContext>(TContext context, string tableName) where TContext : DbContext
+
+
+
+
+
+        private async Task<bool> DoesTableExistAsync<TContext>(TContext context, string tableName, string schemaName) where TContext : DbContext
         {
             var sqlQuery = "SELECT CASE WHEN EXISTS (" +
                            "SELECT * FROM INFORMATION_SCHEMA.TABLES " +
-                           "WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @tableName) " +
+                           "WHERE TABLE_SCHEMA = @schemaName AND TABLE_NAME = @tableName) " +
                            "THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END";
 
-            var parameter = new Microsoft.Data.SqlClient.SqlParameter("@tableName", tableName);
+            var parameters = new[]
+            {
+                new Microsoft.Data.SqlClient.SqlParameter("@SchemaName", schemaName),
+                new Microsoft.Data.SqlClient.SqlParameter("@TableName", tableName)
+            };
 
-            var exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameter);
+            var exists = await context.Database.ExecuteSqlRawAsync(sqlQuery, parameters);
             return exists == 1;
         }
 
-        [HttpPost("get-login-and-password-for-newcommer")]
+        [HttpPost("get-login-and-password-for-newcommer")] //ИСПРАВЛЕНО, НО НЕДОДЕЛАНО С ВВОДНЫМ ИНСТРУКТАЖОМ!
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] List<string> someInfoAboutNewUser)
         {
-            UserTemp newUser = new UserTemp(someInfoAboutNewUser[0], someInfoAboutNewUser[1], someInfoAboutNewUser[2], someInfoAboutNewUser[3], _dataService);
+            UserTemp newUser = new UserTemp(someInfoAboutNewUser[0], someInfoAboutNewUser[1], someInfoAboutNewUser[2], someInfoAboutNewUser[3], _userContext);
 
             bool isNeededToCreateInitialInstruction = someInfoAboutNewUser[4] == "True";
 
@@ -878,49 +1001,48 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<bool> AssignNewInstructionToUser(FullCustomInstruction fullCustomInstruction, int? departmentId, string personnelNumber)
         {
+            // Get the username and personnel number of the person who signed the instruction
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? personnelNumberOfSignedBy = await _dataService.UserNameToTableName(userName);
 
             if (departmentId == null) return false;
             int departmentIdNotNull = departmentId.Value;
 
+            // Get the appropriate DbContext for the department
             ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentIdNotNull);
             if (dbContext == null) return false;
 
             try
             {
-                string connectionString = dbContext.Database.GetDbConnection().ConnectionString;
-                using (var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString))
+                var instructionId = fullCustomInstruction._instruction.instruction_id;
+                List<string> personnelNumbers = new List<string> { personnelNumber };
+
+                foreach (var personelNumber in personnelNumbers)
                 {
-                    await connection.OpenAsync();
-                    using (var transaction = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync())
-                    {
-                        try
-                        {
-                            var instructionId = fullCustomInstruction._instruction.instruction_id;
+                    // Use the constants to create the table name and the SQL query
+                    /*string tableName = $"[SCHEMA ENTER HERE VALID!].[{personelNumber}]"; // Разблокируй это все и продолжнай. Вставь нормальную schema cюда!
+                    string query = $@"
+            INSERT INTO {tableName} 
+            ({tableName_sql_USER_instruction_id}, 
+            {tableName_sql_USER_is_instruction_passed}, 
+            {tableName_sql_USER_whenWasSendByHeadOfDepartment}, 
+            {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime}, 
+            {tableName_sql_USER_instr_was_signed_by_PN}) 
+            VALUES 
+            (@instructionId, @falseValue, @whenWasSendToUser, @whenWasSendToUserUTC, @PNOfSignedBy)";*/
 
-                            List<string> personnelNumbers = new List<string> { personnelNumber };
-
-                            DBProcessor dBProcessor = new DBProcessor(connectionString);
-                            var isNotificationSent = await dBProcessor.SendNotificationToPeopleAsync(personnelNumbers, instructionId, connection, transaction, personnelNumberOfSignedBy);
-
-                            if (!isNotificationSent)
-                            {
-                                await transaction.RollbackAsync();
-                                return false;
-                            }
-
-                            await transaction.CommitAsync();
-                            return true;
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine(ex.ToString());
-                            await transaction.RollbackAsync();
-                            return false;
-                        }
-                    }
+                    // Execute the query using the appropriate SQL parameters
+                    await dbContext.Database.ExecuteSqlRawAsync(
+                        query,
+                        new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId),
+                        new Microsoft.Data.SqlClient.SqlParameter("@falseValue", false),
+                        new Microsoft.Data.SqlClient.SqlParameter("@whenWasSendToUser", DateTime.Now),
+                        new Microsoft.Data.SqlClient.SqlParameter("@whenWasSendToUserUTC", DateTime.UtcNow),
+                        new Microsoft.Data.SqlClient.SqlParameter("@PNOfSignedBy", personnelNumberOfSignedBy)
+                    );
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
@@ -928,6 +1050,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return false;
             }
         }
+
 
 
         [HttpGet("get-list-of-people-init-instructions")]
@@ -1169,7 +1292,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         public class UserTemp
         {
-            private readonly MyDataService _dataService;
+            ApplicationDbContextUsers _userContext;
             public string PersonnelNumber { get; set; }
             public string Login { get; set; }
             public string Password { get; set; }
@@ -1178,12 +1301,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             public string? DeskNumber { get; set; }
             public int? UserRoleIndex { get; set; }
 
-            public UserTemp(string personnelNumber, string departmentName, string deskNumber, string userRole, MyDataService dataService)
+            public UserTemp(string personnelNumber, string departmentName, string deskNumber, string userRole, ApplicationDbContextUsers userContext)
             {
                 PersonnelNumber = personnelNumber;
                 DepartmentId = departmentNameToId(departmentName);
                 DeskNumber = deskNumber;
-                _dataService = dataService;
+                _userContext = userContext;
 
                 Random random = new Random();
                 int randomNumber = random.Next(1000000, 9999999);
@@ -1195,13 +1318,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             private int? IndexFromUserRole(string userRole)
             {
-                var temporaryConnectionString = _dataService._configuration.GetConnectionString("DefaultConnectionForUsers");
-                var temporaryOptionsBuilder = new DbContextOptionsBuilder<ApplicationDbContextUsers>();
-                temporaryOptionsBuilder.UseSqlServer(temporaryConnectionString);
 
-                using (var context = new ApplicationDbContextUsers(temporaryOptionsBuilder.Options))
-                {
-                    var roleId = context.Roles
+                    var roleId = _userContext.Roles
                                           .Where(r => r.roletype == userRole)
                                           .Select(r => r.roleid)
                                           .FirstOrDefault();
@@ -1215,7 +1333,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     {
                         return null;
                     }
-                }
             }
 
             private int departmentNameToId(string departmentName)

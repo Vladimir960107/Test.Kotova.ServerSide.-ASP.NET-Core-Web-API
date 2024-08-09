@@ -196,7 +196,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
             }
         }
 
-        public static async Task CreateTableDIAsync(string tableName, string _dbConnection)
+        public static async Task CreateTableDIAsync(string tableName, DbContext context, string schemaName)
         {
             try
             {
@@ -211,9 +211,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 }
 
                 string sql = @$"
-                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName)
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = @tableName AND schema_id = SCHEMA_ID(@schemaName))
                 BEGIN
-                    EXEC('CREATE TABLE [' + @tableName + '] (
+                    EXEC('CREATE TABLE [' + @schemaName + '].[' + @tableName + '] (
                         ID int IDENTITY(1,1) PRIMARY KEY, 
                         {tableName_sql_USER_instruction_id} INT UNIQUE,
                         {tableName_sql_USER_is_instruction_passed} BIT, 
@@ -225,15 +225,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                     )')
                 END";
 
-                using (var conn = new SqlConnection(_dbConnection))
+                var parameters = new[]
                 {
-                    await conn.OpenAsync();
-                    using (SqlCommand cmd = new SqlCommand(sql, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@tableName", tableName);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-                }
+                    new Microsoft.Data.SqlClient.SqlParameter("@tableName", tableName),
+                    new Microsoft.Data.SqlClient.SqlParameter("@schemaName", schemaName)
+                };
+
+                await context.Database.ExecuteSqlRawAsync(sql, parameters);
+
             }
             catch (Exception ex)
             {
