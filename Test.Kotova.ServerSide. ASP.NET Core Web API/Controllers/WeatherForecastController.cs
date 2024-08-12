@@ -126,7 +126,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [Authorize]
-        [HttpGet("get_instructions_for_user")]  //»—œ–¿À¬≈ÕŒ, ÕŒ Õ≈ œ–Œ¬≈–≈ÕŒ ◊“Œ ‘”Õ ÷»ﬂ –¿¡Œ“¿≈“  Œ√ƒ¿ ≈—“‹ »Õ—“–” “¿∆»!
+        [HttpGet("get_instructions_for_user")]  //»—œ–¿¬À≈ÕŒ, ¬–Œƒ≈ –¿¡Œ“¿≈“?
         public async Task<IActionResult> GetNotifications()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
@@ -149,8 +149,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<object> ReadDataFromDynamicTable(string tableName, int departmentId)
         {
-            // Determine the correct DbContext based on departmentId
-            // Determine the correct DbContext based on departmentId
             var context = GetDbContextForDepartment(departmentId);
             if (context == null)
             {
@@ -179,7 +177,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
             { "ID", i.instruction_id },
             { "instruction_id", i.instruction_id },
-            { "when_was_send_to_user", whenWasSentMap.ContainsKey(i.instruction_id) ? whenWasSentMap[i.instruction_id] : null },
+            { "when_was_send_to_user", whenWasSentMap.ContainsKey(i.instruction_id) ? whenWasSentMap[i.instruction_id]: null},
             { "path_to_instruction", i.path_to_instruction },
             { "cause_of_instruction", i.cause_of_instruction },
             { "type_of_instruction", i.type_of_instruction }
@@ -191,7 +189,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 .Select(fp => new Dictionary<string, object>
                 {
             { "instruction_id", fp.instruction_id },
-            { "file_path", fp.file_path }
+            { "file_path", fp.file_path ?? null}
                 })
                 .ToListAsync();
 
@@ -214,7 +212,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         [Authorize]
-        [HttpPost("instruction_is_passed_by_user")]
+        [HttpPost("instruction_is_passed_by_user")] //œ–Œ¬≈–≈ÕŒ, “Œ◊ÕŒ –¿¡Œ“¿≈“ Õ¿ ¬¬ŒƒÕ€’ »Õ—“–” “¿∆¿’!
         public async Task<IActionResult> SendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary)
         {
             string jsonString = System.Text.Json.JsonSerializer.Serialize(jsonDictionary);
@@ -231,11 +229,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string? tableNameForUser = await _dataService.UserNameToTableName(userName);
+            string? personnelNumberForUser = await _userContext.Users
+                .Where(u => userName == u.username)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
             int departmentId = await GetDepartmentIdFromUserName(userName);
-            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
+            if (personnelNumberForUser == null) { return BadRequest($"The personelNumber for this user isn't found. Wait till you have personel number"); }
 
-            if (await PassInstructionIntoDb(dictionaryOfInstruction, tableNameForUser, departmentId))
+            if (await PassInstructionIntoDb(dictionaryOfInstruction, personnelNumberForUser, departmentId))
             {
                 return Ok("Instruction Is passed, information added to Database");
             }
@@ -244,109 +245,81 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return NotFound("Instruction was not found in DB!");
             }
         }
-
-        private async Task<bool> PassInstructionIntoDb(Dictionary<string, object> jsonDictionary, string tableNameForUser, int departmentId)
+        private async Task<bool> PassInstructionIntoDb(Dictionary<string, object> jsonDictionary, string personnelNumberForUser, int departmentId)
         {
-            string connectionString = GetConnectionStringByDepartmentId(departmentId);
-
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDBContextGeneralConstr>();
-            optionsBuilder.UseSqlServer(connectionString);
-
-            string tableName = DBProcessor.tableName_Instructions_sql;
-            string columnName = DBProcessor.tableName_sql_INSTRUCTIONS_cause;
-
-            string instructionIdColumn = DBProcessor.tableName_sql_USER_instruction_id;
-            string isPassedColumn = DBProcessor.tableName_sql_USER_is_instruction_passed;
-
-            string dateWhenPassed = DBProcessor.tableName_sql_USER_datePassed;
-            string dateWhenPassedUTCTime = DBProcessor.tableName_sql_User_datePassed_UTCTime;
-            string instructionTypeColumn = DBProcessor.tableName_sql_USER_instruction_type;
-
-            string sqlQuery = @$"SELECT * FROM [{tableName.Split('.')[1]}] WHERE [{columnName}] = @value";
-            string sqlQueryChangePassedVariable = @$"UPDATE [{tableNameForUser}]
-            SET [{isPassedColumn}] = 1,
-                [{dateWhenPassedUTCTime}] = GETUTCDATE(),
-                [{dateWhenPassed}] = GETDATE()           
-            WHERE [{instructionIdColumn}] = @instructionId";
-
-            using (var context = new ApplicationDBContextGeneralConstr(optionsBuilder.Options))
+            var context = GetDbContextForDepartment(departmentId); // Replace this with your actual method to get the context based on departmentId
+            if (context == null)
             {
-                var conn = context.Database.GetDbConnection();
-                await conn.OpenAsync();
-                using (var transaction = await conn.BeginTransactionAsync())
+                throw new ArgumentException("Invalid departmentId");
+            }
+
+            string schemaName = GetSchemaName(departmentId);
+
+            string instructionCause = ConvertJsonElement(jsonDictionary[DBProcessor.tableName_sql_INSTRUCTIONS_cause])?.ToString();
+
+            if (string.IsNullOrEmpty(instructionCause))
+            {
+                throw new ArgumentException("Instruction cause is invalid or missing");
+            }
+
+            using (var transaction = await context.Database.BeginTransactionAsync())
+            {
+                try
                 {
-                    try
-                    {
-                        using (var command = conn.CreateCommand())
+                    // Step 1: Fetch the instruction based on the cause
+                    var instruction = await context.Instructions
+                        .Where(i => i.cause_of_instruction == instructionCause)
+                        .Select(i => new
                         {
-                            command.Transaction = transaction;
-                            command.CommandText = sqlQuery;
-                            DbParameter param = command.CreateParameter();
-                            param.ParameterName = "@value";
-                            param.Value = ConvertJsonElement(jsonDictionary[columnName]);
-                            command.Parameters.Add(param);
+                            i.instruction_id,
+                            i.type_of_instruction
+                        })
+                        .FirstOrDefaultAsync();
 
-                            int rowCount = 0;
-                            int instructionId = 0;
-                            int typeOfInstruction = -1;
-
-                            using (var reader = await command.ExecuteReaderAsync())
-                            {
-                                while (await reader.ReadAsync())
-                                {
-                                    rowCount++;
-                                    instructionId = reader.GetInt32(reader.GetOrdinal(instructionIdColumn));
-                                    typeOfInstruction = reader.GetByte(reader.GetOrdinal(instructionTypeColumn));
-                                }
-                            }
-
-                            if (rowCount == 1)
-                            {
-                                if (typeOfInstruction == 0)
-                                {
-                                    Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");
-                                }
-                                command.Parameters.Clear();
-
-                                command.CommandText = sqlQueryChangePassedVariable;
-                                DbParameter instructionIdParam = command.CreateParameter();
-                                instructionIdParam.ParameterName = "@instructionId";
-                                instructionIdParam.Value = instructionId;
-                                command.Parameters.Add(instructionIdParam);
-
-                                int rowsAffected = await command.ExecuteNonQueryAsync();
-                                if (rowsAffected > 0)
-                                {
-                                    await transaction.CommitAsync();
-                                    return true;
-                                }
-                                else
-                                {
-                                    await transaction.RollbackAsync();
-                                    return false;
-                                }
-                            }
-                            else if (rowCount > 1)
-                            {
-                                throw new Exception("Instructions with the same cause name were found in multiple quantities!");
-                            }
-                            else
-                            {
-                                Console.WriteLine("No rows matched the criteria.");
-                                await transaction.RollbackAsync();
-                                return false;
-                            }
-                        }
-                    }
-                    catch (Exception ex)
+                    if (instruction == null)
                     {
-                        Console.WriteLine($"An error occurred: {ex.Message}");
+                        Console.WriteLine("No rows matched the criteria.");
+                        await transaction.RollbackAsync();
+                        return false;
+                    }
+
+                    if (instruction.type_of_instruction == 0)
+                    {
+                        Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");
+                        /*await transaction.RollbackAsync();
+                        return false;*/ //Õ≈ ÁÌ‡˛, ÏÓÊÂÚ ·˚Ú¸ Áˇ ˇ ˝ÚÓ Á‡ÍÓÏÂÌÚËÓ‚‡Î?
+                    }
+
+                    // Step 2: Update the user's instruction record
+                    var dynamicTableQuery = $"UPDATE [{schemaName}].[{personnelNumberForUser}] SET " +
+                                            $"{DBProcessor.tableName_sql_USER_is_instruction_passed} = 1, " +
+                                            $"{DBProcessor.tableName_sql_User_datePassed_UTCTime} = GETUTCDATE(), " +
+                                            $"{DBProcessor.tableName_sql_USER_datePassed} = GETDATE() " +
+                                            $"WHERE {DBProcessor.tableName_sql_USER_instruction_id} = @instructionId";
+
+                    var rowsAffected = await context.Database.ExecuteSqlRawAsync(dynamicTableQuery,
+                        new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instruction.instruction_id));
+
+                    if (rowsAffected > 0)
+                    {
+                        await transaction.CommitAsync();
+                        return true;
+                    }
+                    else
+                    {
                         await transaction.RollbackAsync();
                         return false;
                     }
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An error occurred: {ex.Message}");
+                    await transaction.RollbackAsync();
+                    return false;
+                }
             }
         }
+
 
         private static object ConvertJsonElement(object value)
         {
@@ -364,7 +337,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return value;
         }
 
-        [HttpPost("upload")]
+        [HttpPost("upload")] //œŒ ¿ Õ≈ ¿ “”¿À‹ÕŒ!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
         {
@@ -443,7 +416,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("download-newest")]
+        [HttpGet("download-newest")] //œŒ ¿ Õ≈ ¿ “”¿À‹ÕŒ!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public IActionResult DownloadNewestFile()
         {
@@ -471,7 +444,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("sync-names-with-db")]
+        [HttpGet("sync-names-with-db")] //»—œ–¿¬À≈ÕŒ, ¬–Œƒ≈ ¬—® –¿¡Œ“¿≈“!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SyncNamesWithDB([FromServices] IConfiguration configuration)
         {
@@ -484,16 +457,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
 
                 int departmentId = await GetDepartmentIdFromUserName(username);
-                string? connectionString = GetConnectionStringByDepartmentId(departmentId);
 
-                if (string.IsNullOrEmpty(connectionString))
+
+                ApplicationDBContextBase? dbContext = GetDbContextForDepartment(departmentId);
+                if (dbContext == null)
                 {
-                    return BadRequest("Connection string is not configured for the provided department ID.");
+                    return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
-
-
-                DBProcessor dbProcessor = new DBProcessor(connectionString);
-                List<Tuple<string, string>> namesAndBirthDates = await dbProcessor.GetNamesAsync();
+                List<Tuple<string, string>> namesAndBirthDates = await dbContext.Department_employees
+             .Select(e => new Tuple<string, string>(e.full_name, e.birth_date.ToString("yyyy-MM-dd")))
+             .ToListAsync();
                 return Ok(Encryption_Kotova.EncryptListOfTuples(namesAndBirthDates));
             }
             catch (Exception ex)
@@ -524,7 +497,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             };
         }
 
-        [HttpGet("sync-instructions-with-db")]
+        [HttpGet("sync-instructions-with-db")] //–¿¡Œ“¿≈“, ¬–Œƒ≈, ¬—® Œ !
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SyncInstructionsWithDB()
         {
@@ -564,7 +537,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<IActionResult> SendInstructionAndNamesInternal(InstructionPackage package, string? username)
         {
-            string? personnelNumberOfSignedBy = await _dataService.UserNameToTableName(username);
+            string? personnelNumberOfSignedBy = "not inserted!";// await UserNameToSchemaName(username); 
 
             if (package == null)
             {
@@ -1003,12 +976,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             // Get the username and personnel number of the person who signed the instruction
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
-            string? personnelNumberOfSignedBy = await _dataService.UserNameToTableName(userName);
+            string? personnelNumberOfSignedBy = await _userContext.Users
+                .Where(u => u.username == userName)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
 
             if (departmentId == null) return false;
             int departmentIdNotNull = departmentId.Value;
+            string schemaName = GetSchemaName(departmentIdNotNull);
+            if (schemaName == "dbo") return false;
 
-            // Get the appropriate DbContext for the department
             ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentIdNotNull);
             if (dbContext == null) return false;
 
@@ -1019,8 +996,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 foreach (var personelNumber in personnelNumbers)
                 {
-                    // Use the constants to create the table name and the SQL query
-                    /*string tableName = $"[SCHEMA ENTER HERE VALID!].[{personelNumber}]"; // –‡Á·ÎÓÍËÛÈ ˝ÚÓ ‚ÒÂ Ë ÔÓ‰ÓÎÊÌ‡È. ¬ÒÚ‡‚¸ ÌÓÏ‡Î¸ÌÛ˛ schema c˛‰‡!
+                    string tableName = $"[{schemaName}].[{personelNumber}]";
                     string query = $@"
             INSERT INTO {tableName} 
             ({tableName_sql_USER_instruction_id}, 
@@ -1029,7 +1005,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime}, 
             {tableName_sql_USER_instr_was_signed_by_PN}) 
             VALUES 
-            (@instructionId, @falseValue, @whenWasSendToUser, @whenWasSendToUserUTC, @PNOfSignedBy)";*/
+            (@instructionId, @falseValue, @whenWasSendToUser, @whenWasSendToUserUTC, @PNOfSignedBy)";
 
                     // Execute the query using the appropriate SQL parameters
                     await dbContext.Database.ExecuteSqlRawAsync(
@@ -1049,6 +1025,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 Console.WriteLine(ex.ToString());
                 return false;
             }
+        }
+
+        private async Task<string?> UserNameToSchemaName(string userName)
+        {
+            int? departmentId = await _userContext.Users
+               .Where(u => u.username == userName)
+               .Select(u => u.department_id)
+               .FirstOrDefaultAsync();
+            string? schemaName = await _userContext.Departments
+                .Where(d => d.department_id == departmentId)
+                .Select(d => d.department_schema)
+                .FirstOrDefaultAsync();
+            return schemaName;
+
         }
 
 
