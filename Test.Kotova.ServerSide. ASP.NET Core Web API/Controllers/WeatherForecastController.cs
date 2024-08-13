@@ -37,6 +37,8 @@ using System.Transactions;
 using System.Data.SqlClient;
 using Department = Kotova.CommonClasses.Department;
 using System.ComponentModel.DataAnnotations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using System.Globalization;
 
 //Movig to schema in databases after that
 
@@ -107,7 +109,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpGet("greeting")] //ИСПРАВЛЕНО
         public IActionResult GetGreeting()
         {
-            return Ok("Hello, World!");
+            return Ok("Привет, мир!");
         }
 
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
@@ -120,7 +122,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                    .FirstOrDefaultAsync();
             if (departmentId == null)
             {
-                return BadRequest("departmentId wasn't found by userName");
+                return BadRequest("Номер отдела не найден по имю пользователя!");
             }
             return Ok(departmentId);
         }
@@ -134,12 +136,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 .Where(u => u.username == userName)
                 .Select(u => u.current_personnel_number)
                 .FirstOrDefaultAsync();
-            if (tableNameForUser == null) { return BadRequest($"The personelNumber for this user wasn't found. Wait till you have personel number"); }
+            if (tableNameForUser == null) { return BadRequest($"Не найден персоналный номер для данного пользователя. Подождите пока появится персональный номер?"); }
             int? departmentId = await _userContext.Users
                    .Where(u => u.username == userName)
                    .Select(u => u.department_id)
                    .FirstOrDefaultAsync();
-            if (departmentId == null) { return BadRequest($"The departmentId for this user wasn't found"); }
+            if (departmentId == null) { return BadRequest($"Номер отдела не найден!"); }
             int departmentIdNotNull = (int)departmentId;
             object whatever = await ReadDataFromDynamicTable(tableNameForUser, departmentIdNotNull);
             string serialized = JsonConvert.SerializeObject(whatever);
@@ -527,21 +529,32 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpPost("send-instruction-and-names")]
+        [HttpPost("send-instruction-to-names")] //ПРОВЕРЕНО, РАБОТАЕТ
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public async Task<IActionResult> SendInstructionAndNames([FromBody] InstructionPackage package)
+        public async Task<IActionResult> SendInstructionToNames([FromBody] InstructionPackage package)
         {
-            var username = User.FindFirst(ClaimTypes.Name)?.Value;
-            return await SendInstructionAndNamesInternal(package, username);
+            
+            return await SendInstructionToNamesInternal(package);
         }
 
-        private async Task<IActionResult> SendInstructionAndNamesInternal(InstructionPackage package, string? username)
+        private async Task<IActionResult> SendInstructionToNamesInternal(InstructionPackage package)
         {
-            string? personnelNumberOfSignedBy = "not inserted!";// await UserNameToSchemaName(username); 
+            var username = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? personnelNumberOfSignedBy = await _userContext.Users
+                .Where(u => u.username == username)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
+            int departmentId = await _userContext.Users
+                   .Where(u => u.username == username)
+                   .Select(u => u.department_id)
+                   .FirstOrDefaultAsync();
+            ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentId);
+
+            if (dbContext == null) { return BadRequest("Отдел для данного человека не найден! send-instruction-to-names failed."); }
 
             if (package == null)
             {
-                return BadRequest("Empty or null encrypted payload is not acceptable.");
+                return BadRequest("пустой package недопустим.");
             }
             try
             {
@@ -553,13 +566,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return Unauthorized("username claim of Chief(or User when used by Coordinator) не найден.");
                 }
-                string? connectionString = null;
-                int departmentId = await GetDepartmentIdFromUserName(username);
 
-                connectionString = GetConnectionStringByDepartmentId(departmentId);
-
-                DBProcessor example = new DBProcessor(connectionString);
-                bool result = await example.ProcessDataAsync(package, personnelNumberOfSignedBy);
+                bool result = await ProcessDataAsync(package, personnelNumberOfSignedBy, dbContext);
                 if (result)
                 {
                     return Ok($"Received and processed successfully: {package.InstructionCause} instructions with {package.NamesAndBirthDates.Count} names.");
@@ -576,13 +584,142 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<string> DecryptAsync(string encryptedData)
+        private async Task<bool> ProcessDataAsync(InstructionPackage package, string PNOfSignedBy, ApplicationDBContextBase dbContext)
         {
-            await Task.Delay(10);
-            return Encoding.UTF8.GetString(Convert.FromBase64String(encryptedData));
+            try
+            {
+                using (var transaction = await dbContext.Database.BeginTransactionAsync())
+                {
+                    try
+                    {
+
+                        var instruction = await dbContext.Instructions
+                        .FirstOrDefaultAsync(i => i.cause_of_instruction == package.InstructionCause); //ЗДЕСЬ ПРОВЕРКА ПО cause А НЕ ПО ID. ТАК СОЙДЁТ? ИЛИ ЛУЧШЕ ПО ID? ПОДУМАЙ.
+
+                        if (instruction == null)
+                        {
+                            Console.WriteLine("Couldn't find instruction by its cause");
+                            await transaction.RollbackAsync();
+                            return false;
+                        }
+
+                        // Step 2: Set is_assigned_to_people to true
+                        instruction.is_assigned_to_people = true;
+                        dbContext.Instructions.Update(instruction);
+                        await dbContext.SaveChangesAsync();
+
+                        // Step 3: Find personnel numbers based on names and birthdates
+                        var personnelNumbers = await FindPNsOfNamesAndBirthDates(package.NamesAndBirthDates, dbContext);
+
+                        if (!personnelNumbers.Any())
+                        {
+                            Console.WriteLine("Couldn't find personnel numbers by full names");
+                            await transaction.RollbackAsync();
+                            return false;
+                        }
+
+                        // Step 4: Send notification to people
+                        var isEverythingFine = await SendNotificationToPeopleAsync(personnelNumbers, instruction.instruction_id, dbContext, PNOfSignedBy);
+
+                        if (!isEverythingFine)
+                        {
+                            Console.WriteLine("Couldn't add instruction to names");
+                            await transaction.RollbackAsync();
+                            return false;
+                        }
+
+                        await transaction.CommitAsync();
+                        return true;
+                    }
+                    catch
+                    {
+                        await transaction.RollbackAsync();
+                        throw;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+                return false;
+            }
         }
 
-        [HttpGet("import-into-db")]
+        private async Task<List<string>> FindPNsOfNamesAndBirthDates(List<Tuple<string, string>>? namesAndBirthDatesString, ApplicationDBContextBase context)
+        {
+            if (namesAndBirthDatesString == null || !namesAndBirthDatesString.Any())
+                throw new ArgumentException("namesAndBirthDatesString is empty!");
+
+            var (names, birthDates) = DeconstructNamesAndBirthDates(namesAndBirthDatesString);
+
+            var personnelNumbers = await context.Department_employees
+                .Where(e => names.Contains(e.full_name) && birthDates.Contains(e.birth_date))
+                .Select(e => e.personnel_number)
+                .ToListAsync();
+
+            return personnelNumbers;
+        }
+
+        private (List<string>, List<DateTime>) DeconstructNamesAndBirthDates(List<Tuple<string, string>> namesAndBirthDatesString)
+        {
+            List<string> names = new List<string>();
+            List<DateTime> birthDates = new List<DateTime>();
+
+            foreach (var item in namesAndBirthDatesString)
+            {
+                try
+                {
+                    DateTime date = DateTime.ParseExact(item.Item2, birthDate_format, CultureInfo.InvariantCulture);
+                    names.Add(item.Item1);
+                    birthDates.Add(date);
+                }
+                catch (FormatException ex)
+                {
+                    Console.WriteLine($"Invalid date format for: {item.Item1} with date {item.Item2}");
+                    throw;
+                }
+            }
+
+            return (names, birthDates);
+        }
+
+        private async Task<bool> SendNotificationToPeopleAsync(List<string> personnelNumbers, int instructionId, ApplicationDBContextBase context, string personnelNumberOfSignedBy)
+        {
+            try
+            {
+                var userName = User.FindFirst(ClaimTypes.Name)?.Value;
+                var schemaName = await UserNameToSchemaName(userName);
+                if (schemaName == null ) { return false; }
+                foreach (string personnelNumber in personnelNumbers)
+                {
+                    string tableName = $"[{schemaName}].[{personnelNumber}]";
+                    string query = $@"
+                INSERT INTO {tableName} 
+                ({DBProcessor.tableName_sql_USER_instruction_id}, 
+                 {DBProcessor.tableName_sql_USER_is_instruction_passed}, 
+                 {DBProcessor.tableName_sql_USER_whenWasSendByHeadOfDepartment}, 
+                 {DBProcessor.tableName_sql_USER_whenWasSendByHeadOfDepartment_UTCTime}, 
+                 {DBProcessor.tableName_sql_USER_instr_was_signed_by_PN}) 
+                VALUES 
+                (@instructionId, @falseValue, @whenWasSendToUser, @whenWasSendToUserUTC, @PNOfSignedBy)";
+
+                    await context.Database.ExecuteSqlRawAsync(query,
+                        new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId),
+                        new Microsoft.Data.SqlClient.SqlParameter("@falseValue", false),
+                        new Microsoft.Data.SqlClient.SqlParameter("@whenWasSendToUser", DateTime.Now),
+                        new Microsoft.Data.SqlClient.SqlParameter("@whenWasSendToUserUTC", DateTime.UtcNow),
+                        new Microsoft.Data.SqlClient.SqlParameter("@PNOfSignedBy", personnelNumberOfSignedBy));
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"An error occurred: {ex.Message}");
+                return false;
+            }
+        }
+
+        [HttpGet("import-into-db")] //ПОКА НЕ АКТУАЛЬНО
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> ImportIntoDBAsync()
         {
@@ -626,7 +763,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return newestFile.FullName;
         }
 
-        [HttpPost("add-new-instruction-into-db")]
+        [HttpPost("add-new-instruction-into-db")] //ПРОВЕРЕНО.
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] FullCustomInstruction fullInstruction)
         {
@@ -714,7 +851,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return user.department_id;
         }
 
-        [HttpGet("download-list-of-all-departments-and-employees")]
+        [HttpGet("download-list-of-all-departments-and-employees")] //ПРОВЕРЕНО
         [Authorize(Roles = "Management, Administrator")]
         public async Task<IActionResult> DownloadListOfDepartmentsAndEmployeesFromDB()
         {
@@ -1103,14 +1240,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok(results);
         }
 
-        private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
+        /*private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
         {
             List<ApplicationDBContextBase> dbContexts = new List<ApplicationDBContextBase>();
             dbContexts.Add(_contextGeneralConstr);
             dbContexts.Add(_contextTechnicalDepartment);
 
             return dbContexts;
-        }
+        }*/
 
         [HttpGet("get-not-passed-instructions-for-chief")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
