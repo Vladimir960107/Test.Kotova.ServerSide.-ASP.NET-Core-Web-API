@@ -508,7 +508,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 var username = User.FindFirst(ClaimTypes.Name)?.Value;
                 if (string.IsNullOrEmpty(username))
                 {
-                    return Unauthorized("Username claim of Chief not found.");
+                    return Unauthorized("Пользователь с вашим именем не найден.");
                 }
                 List<Instruction> instructions = new List<Instruction>();
                 int departmentId = await GetDepartmentIdFromUserName(username);
@@ -517,7 +517,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
-                instructions = await dbContext.Instructions.ToListAsync();
+                instructions = await dbContext.Instructions
+                    .Where(i => i.is_assigned_to_people == false)
+                    .ToListAsync();
                 var serialized = JsonConvert.SerializeObject(instructions);
                 var encryptedData = Encryption_Kotova.EncryptString(serialized);
                 return Ok(encryptedData);
@@ -1240,16 +1242,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok(results);
         }
 
-        /*private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
+        private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
         {
             List<ApplicationDBContextBase> dbContexts = new List<ApplicationDBContextBase>();
             dbContexts.Add(_contextGeneralConstr);
             dbContexts.Add(_contextTechnicalDepartment);
 
             return dbContexts;
-        }*/
+        }
 
-        [HttpGet("get-not-passed-instructions-for-chief")]
+        [HttpGet("get-not-passed-instructions-for-chief")] //ПРОВЕРЕНО, для Начальника вроде всё работает. Только для администратора не будет находить. Исправь это, если захочешь
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> GetNotPassedInstructionForChief()
         {
@@ -1267,110 +1269,92 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return NotFound("для данного начальника не найден отдел! (GetNotPassedInstructionForChief)");
             }
 
-            return await CheckPassingTheInstructionsBeforeReturningTheData(dbContext);
+            return await CheckPassingTheInstructionsBeforeReturningTheData(dbContext, departmentId);
         }
 
-        private static async Task<int> ExecuteScalarAsyncInt(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
-        {
-            using (var command = dbContext.Database.GetDbConnection().CreateCommand())
-            {
-                command.CommandText = sql;
-                if (command.Connection.State == ConnectionState.Closed)
-                {
-                    await command.Connection.OpenAsync();
-                }
-
-                foreach (var parameter in parameters)
-                {
-                    command.Parameters.Add(parameter);
-                }
-
-                var result = await command.ExecuteScalarAsync();
-                return Convert.ToInt32(result);
-            }
-        }
-
-        private static async Task<string> ExecuteScalarAsyncString(ApplicationDBContextBase dbContext, string sql, params object[] parameters)
-        {
-            using (var command = dbContext.Database.GetDbConnection().CreateCommand())
-            {
-                command.CommandText = sql;
-                if (command.Connection.State == ConnectionState.Closed)
-                {
-                    await command.Connection.OpenAsync();
-                }
-
-                foreach (var parameter in parameters)
-                {
-                    command.Parameters.Add(parameter);
-                }
-
-                var result = await command.ExecuteScalarAsync();
-                return result.ToString();
-            }
-        }
-
-        private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext)
+        private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext,int departmentId)
         {
             var instructionsToCheck = await dbContext.Instructions
                 .Where(i => !i.is_passed_by_everyone)
                 .ToListAsync();
-            List<InstructionForChief> instructionsForChiefList = new List<InstructionForChief>();
 
             if (!instructionsToCheck.Any())
             {
-                Console.WriteLine("No instructions to check.");
-                var instructionsForChiefList_Serialized = JsonConvert.SerializeObject(instructionsForChiefList);
-                return Ok(instructionsForChiefList_Serialized);
+                return Ok(JsonConvert.SerializeObject(new List<InstructionForChief>()));
             }
+
+            var schemaName = await _userContext.Departments
+                .Where(d => d.department_id == departmentId)
+                .Select(d => d.department_schema)
+                .FirstOrDefaultAsync();
+            if (schemaName == null) { return BadRequest("schema не найдена для данного отдела (CheckPassingTheInstructionsBeforeReturningTheData)"); }
 
             try
             {
-                var tenDigitTables = dbContext.GetTenDigitTableNames();
+                var tenDigitTables = dbContext.GetTenDigitTableNames(schemaName);
+                List<InstructionForChief> instructionsForChiefList = new List<InstructionForChief>();
 
                 foreach (var instructionToCheck in instructionsToCheck)
                 {
                     int instructionId = instructionToCheck.instruction_id;
 
-                    List<(string personnelNumber, string personName)> instructionIsNotPassedByListOfPeople = new List<(string, string)>();
-                    List<(string personnelNumber, string personName)> instructionIsPassedByListOfPeople = new List<(string, string)>();
+                    var instructionIsNotPassedByListOfPeople = new List<(string personnelNumber, string personName)>();
+                    var instructionIsPassedByListOfPeople = new List<(string personnelNumber, string personName)>();
 
                     foreach (string? tableName in tenDigitTables)
                     {
+                        string[] parts = tableName.Split('.');
+                        if (parts.Length != 2)
+                        {
+                            throw new ArgumentException("Не подходящий формат. Ожидаемый формат: 'SchemaName.TableName'");
+                        }
+                        string tenDigitName = parts[1];
+
+
                         if (string.IsNullOrEmpty(tableName))
                         {
                             Console.WriteLine("Table name is null or empty.");
                             continue;
                         }
 
-                        var sqlQuery = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 0";
-                        var result = await ExecuteScalarAsyncInt(dbContext, sqlQuery, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+                        // Checking if the instruction is not passed by the personnel
+                        var notPassedQuery = dbContext.Set<DynamicEmployeeInstruction>()
+                            .FromSqlRaw($"SELECT * FROM [{schemaName}].[{tenDigitName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 0",
+                            new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId))
+                            .Count();
 
-                        var sqlQueryToRecieveFullName = $"SELECT full_name FROM [{DBProcessor.tableName_sql_MainName.Split(".")[1]}] WHERE [personnel_number] = @PN";
-                        var resultFullName = await ExecuteScalarAsyncString(dbContext, sqlQueryToRecieveFullName, new Microsoft.Data.SqlClient.SqlParameter("@PN", tableName));
-
-                        if (result > 0)
+                        if (notPassedQuery > 0)
                         {
-                            instructionIsNotPassedByListOfPeople.Add((tableName, resultFullName));
+                            var personName = await dbContext.Department_employees
+                                .Where(e => e.personnel_number == tenDigitName)
+                                .Select(e => e.full_name)
+                                .FirstOrDefaultAsync();
+
+                            instructionIsNotPassedByListOfPeople.Add((tableName, personName));
                         }
                         else
                         {
-                            var sqlQuery2 = $"SELECT COUNT(1) FROM [{tableName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 1";
-                            var result2 = await ExecuteScalarAsyncInt(dbContext, sqlQuery2, new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+                            var passedQuery = dbContext.Set<DynamicEmployeeInstruction>()
+                                .FromSqlRaw($"SELECT * FROM [{schemaName}].[{tenDigitName}] WHERE [instruction_id] = @instructionId AND is_instruction_passed = 1",
+                                new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId))
+                                .Count();
 
-                            var sqlQueryToRecieveFullName2 = $"SELECT full_name FROM [{DBProcessor.tableName_sql_MainName.Split(".")[1]}] WHERE [personnel_number] = @PN";
-                            var resultFullName2 = await ExecuteScalarAsyncString(dbContext, sqlQueryToRecieveFullName2, new Microsoft.Data.SqlClient.SqlParameter("@PN", tableName));
-
-                            if (result2 > 0)
+                            if (passedQuery > 0)
                             {
-                                instructionIsPassedByListOfPeople.Add((tableName, resultFullName2));
+                                var personName = await dbContext.Department_employees
+                                    .Where(e => e.personnel_number == tenDigitName)
+                                    .Select(e => e.full_name)
+                                    .FirstOrDefaultAsync();
+
+                                instructionIsPassedByListOfPeople.Add((tableName, personName));
                             }
                         }
                     }
 
                     if (!instructionIsNotPassedByListOfPeople.Any() && instructionIsPassedByListOfPeople.Any())
                     {
-                        var instructionToUpdate = await dbContext.Instructions.FirstOrDefaultAsync(i => i.instruction_id == instructionId);
+                        var instructionToUpdate = await dbContext.Instructions
+                            .FirstOrDefaultAsync(i => i.instruction_id == instructionId);
 
                         if (instructionToUpdate != null)
                         {
@@ -1502,7 +1486,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             if (string.IsNullOrEmpty(token))
             {
                 Console.WriteLine("Token is null or empty.");
-                return Unauthorized("Validation failed, Token is null or empty.");
+                return Unauthorized("Валидация не прошла. Токен пуст или отсутсвует.");
             }
 
             var principal = _jwtTokenValidator.ValidateToken(token);
@@ -1510,7 +1494,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             if (principal == null)
             {
                 Console.WriteLine("Token validation failed.");
-                return Unauthorized("Validation failed, token is invalid");
+                return Unauthorized("Валидация не прошла, неправильный токен.");
             }
 
             Console.WriteLine("Token validation succeeded.");
@@ -1523,11 +1507,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             var userTemp = await _context.Users.FirstOrDefaultAsync(u => u.username == model.username);
             if (userTemp == null)
             {
-                return BadRequest($"User with username {model.username} wasn't found");
+                return BadRequest($"Пользователь с именем '{model.username}' не был найден");
             }
             if (model.time_for_being_authenticated <= 0)
             {
-                return BadRequest("Time for being authenticated was not correct, type valid time");
+                return BadRequest("Время, выбранное для аутентификации недопустимо.");
             }
 
             (bool?, User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
@@ -1535,7 +1519,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
                 {
-                    return CustomForbid("Current department already has a Chief Authenticated. Ask them to close the application and then after 1 minute, open your application.");
+                    return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
                 }
 
                 try
@@ -1550,7 +1534,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     string secret = _configuration["JwtConfig:Secret"];
                     var token = GenerateJwtToken(claims, secret, model.time_for_being_authenticated);
 
-                    return Ok(new { Token = token, Message = "User authenticated successfully." });
+                    return Ok(new { Token = token, Message = "Успешный вход." });
                 }
                 catch (ArgumentException ex)
                 {
@@ -1559,11 +1543,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             else if (authenticationModel.Item1 == null)
             {
-                return Unauthorized("User doesn't have a personnel number yet, wait until you receive a personnel number");
+                return Unauthorized("У пользователя нет персонального номера. Подождите пока он появится.");
             }
             else
             {
-                return Unauthorized("Authentication failed.");
+                return Unauthorized("Аутентификация не успешна. Вход не выполнен.");
             }
         }
 
@@ -1602,12 +1586,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 catch
                 {
-                    return BadRequest("Couldn't update the user credentials in the database");
+                    return BadRequest("Не смогли обновить новые данные для пользователя. Что-то пошло не так.");
                 }
             }
             else
             {
-                return BadRequest("CheckForValidation returned false");
+                return BadRequest("Валидация данных не пройдена. Перепроверьте указанные данные");
             }
         }
 
@@ -1618,9 +1602,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 try
                 {
                     var newUserExistInDB = await _context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
-                    if (newUserExistInDB != null)
+                    if (newUserExistInDB != null && credentials.Login != user)
                     {
-                        return BadRequest("Username is already taken or exists in the database");
+                        return BadRequest("Пользователь с таким именем уже существует.");
                     }
 
                     var userToUpdate = await _context.Users.FirstOrDefaultAsync(u => u.username == user);
@@ -1637,7 +1621,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     }
                     else
                     {
-                        throw new Exception("User not found");
+                        throw new Exception("Пользователь не найден");
                     }
                 }
                 catch (Exception ex)
@@ -1653,7 +1637,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpGet("securedata")]
         public IActionResult GetSecureData()
         {
-            return Ok("This is secured data.");
+            return Ok("Эта информация доступна только для всех авторизованных пользователей.");
         }
 
         private string RoleModelIntToString(int user_role)
@@ -1665,7 +1649,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 3 => "Coordinator",
                 4 => "Management",
                 5 => "Administrator",
-                _ => throw new ArgumentException($"User role: {user_role} is not valid, something is wrong!")
+                _ => throw new ArgumentException($"Роль под номером: {user_role} не допустима, что-то пошло не так!")
             };
         }
 

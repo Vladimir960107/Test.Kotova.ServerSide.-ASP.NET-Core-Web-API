@@ -51,7 +51,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
 
             modelBuilder.Entity<DynamicEmployeeInstruction>().HasNoKey();
         }
-        public List<string> GetTenDigitTableNames()
+        public List<string> GetTenDigitTableNames(string schemaName = null)
         {
             var tableNames = new List<string>();
             var connection = this.Database.GetDbConnection();
@@ -61,15 +61,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 using (var command = connection.CreateCommand())
                 {
                     command.CommandText = @"
-                        SELECT TABLE_NAME 
-                        FROM INFORMATION_SCHEMA.TABLES 
-                        WHERE TABLE_TYPE = 'BASE TABLE' 
-                        AND TABLE_NAME LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'";
+                SELECT TABLE_SCHEMA, TABLE_NAME 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_TYPE = 'BASE TABLE' 
+                AND TABLE_NAME LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'" +
+                        (schemaName != null ? " AND TABLE_SCHEMA = @SchemaName" : string.Empty);
+
+                    if (schemaName != null)
+                    {
+                        var schemaParameter = command.CreateParameter();
+                        schemaParameter.ParameterName = "@SchemaName";
+                        schemaParameter.Value = schemaName;
+                        command.Parameters.Add(schemaParameter);
+                    }
+
                     using (var reader = command.ExecuteReader())
                     {
                         while (reader.Read())
                         {
-                            tableNames.Add(reader.GetString(0));
+                            string fullTableName = $"{reader.GetString(0)}.{reader.GetString(1)}"; // Schema.TableName
+                            tableNames.Add(fullTableName);
                         }
                     }
                 }
@@ -81,5 +92,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
 
             return tableNames;
         }
+
     }
 }
