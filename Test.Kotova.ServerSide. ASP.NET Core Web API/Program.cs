@@ -87,7 +87,6 @@ builder.Services.AddDbContext<ApplicationDBContextManagement>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 
 builder.Services.AddSingleton<ChiefsManager>();
-builder.Services.AddSingleton<IHostedService, GracefulShutdownService>();
 builder.Services.AddSingleton<JwtTokenValidator>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
