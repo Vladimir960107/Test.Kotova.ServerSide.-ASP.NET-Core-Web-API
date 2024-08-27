@@ -11,6 +11,31 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
 {
     public class ChiefsManager
     {
+        private readonly ConcurrentDictionary<int, Department_inNotification> _signedInChiefs;
+
+        public ChiefsManager()
+        {
+            _signedInChiefs = new ConcurrentDictionary<int, Department_inNotification>();
+        }
+
+        public bool IsChiefOnline(int departmentId)
+        {
+            return _signedInChiefs.ContainsKey(departmentId);
+        }
+
+        public bool TrySignInChief(int departmentId, string chiefId, string connectionId)
+        {
+            return _signedInChiefs.TryAdd(departmentId, new Department_inNotification { ChiefId = chiefId, ConnectionId = connectionId });
+        }
+
+        public bool TrySignOutChief(int departmentId)
+        {
+            return _signedInChiefs.TryRemove(departmentId, out _);
+        }
+    }
+
+    /*public class ChiefsManager // Was working, but not properly!
+    {
         //private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>(); not needed.
         private readonly string _connectionString;
         private ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)> monitorTasks = new ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)>();
@@ -87,14 +112,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
             using (var connection = new SqlConnection(_connectionString))
             {
-                connection.Open();
+                await connection.OpenAsync();
                 using (var command = new SqlCommand(query, connection))
                 {
                     command.Parameters.AddWithValue("@NewValue", true);
                     command.Parameters.AddWithValue("@CurrentDateTime", DateTime.UtcNow);
                     command.Parameters.AddWithValue("@ChiefId", chiefId);
 
-                    command.ExecuteNonQuery();
+                    await command.ExecuteNonQueryAsync();
                 }
             }
         }
@@ -177,7 +202,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
                 }
             }
         }
-    }
+    }*/
 }
 
 

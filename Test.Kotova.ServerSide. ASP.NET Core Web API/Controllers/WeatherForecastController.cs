@@ -477,16 +477,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private string GetConnectionStringByDepartmentId(int departmentId)
-        {
-            return departmentId switch
-            {
-                1 => _dataService._configuration.GetConnectionString("DefaultConnectionForGeneralConstructionDepartment"),
-                2 => _dataService._configuration.GetConnectionString("DefaultConnectionForTechnicalDepartment"),
-                5 => _dataService._configuration.GetConnectionString("DefaultConnectionForManagement"),
-                _ => null
-            };
-        }
 
         private ApplicationDBContextBase GetDbContextForDepartment(int departmentId)
         {
@@ -1011,7 +1001,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return exists == 1;
         }
 
-        [HttpPost("get-login-and-password-for-newcommer")] //ИСПРАВЛЕНО, НО НЕДОДЕЛАНО С ВВОДНЫМ ИНСТРУКТАЖОМ!
+        [HttpPost("get-login-and-password-for-newcommer")] //ПРОВЕРЕНО!
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] List<string> someInfoAboutNewUser)
         {
@@ -1182,7 +1172,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
 
-        [HttpGet("get-list-of-people-init-instructions")]
+        [HttpGet("get-list-of-people-init-instructions")] //Сделано, но толку от простого отображения? Нужно чтобы можно было запросить с сервера 
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GetNamesForInitialInstructions()
         {
@@ -1198,7 +1188,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             foreach (ApplicationDBContextBase dbContext in dbContexts)
             {
                 var instructions = await dbContext.Instructions
-                                                  .Where(i => EF.Functions.Like(i.cause_of_instruction, "Вводный инструктаж для %"))
+                                                  .Where(i => EF.Functions.Like(i.cause_of_instruction, "Вводный инструктаж для %") && i.is_passed_by_everyone == false)
                                                   .ToListAsync();
 
                 foreach (var instruction in instructions)
@@ -1209,6 +1199,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         errors.Add($"Не удалось извлечь 10-значный номер из: {instruction.cause_of_instruction}");
                         continue;
                     }
+
+                    var departmentId = await _userContext.Users
+                        .Where(u => u.current_personnel_number == personnelNumber)
+                        .Select(u => u.department_id)
+                        .FirstOrDefaultAsync();
+                    var schemaName = GetSchemaName(departmentId);
+
+                    var dynamicTableQuery = $"SELECT TOP 1 is_instruction_passed FROM [{schemaName}].[{personnelNumber}]";
+                    var isInstructionPassed = await dbContext.Set<DynamicEmployeeInstruction>()
+                        .FromSqlRaw(dynamicTableQuery)
+                        .Select(i => i.is_instruction_passed)
+                        .FirstOrDefaultAsync();
+
+                    if (isInstructionPassed == true)
+                    {
+                        continue;
+                    }
+
 
                     var employee = await dbContext.Department_employees
                         .Where(e => e.personnel_number == personnelNumber)
@@ -1244,10 +1252,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private List<ApplicationDBContextBase> DownloadListOfDBContextFromDB()
         {
-            List<ApplicationDBContextBase> dbContexts = new List<ApplicationDBContextBase>();
-            dbContexts.Add(_contextGeneralConstr);
-            dbContexts.Add(_contextTechnicalDepartment);
-
+            List<ApplicationDBContextBase> dbContexts = new List<ApplicationDBContextBase>
+            {
+                _contextGeneralConstr,
+                _contextTechnicalDepartment
+            };
             return dbContexts;
         }
 
@@ -1480,7 +1489,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _jwtTokenValidator = jwtTokenValidator;
         }
 
-        [HttpPost("validate-token")]
+        private async Task<int> GetDepartmentIdFromUserName(string username)
+        {
+            var user = await _context.Users
+            .Where(u => u.username == username)
+            .Select(u => new { u.department_id })
+            .FirstOrDefaultAsync();
+            if (user == null)
+            {
+                return -1;
+            }
+            return user.department_id;
+        }
+
+        [HttpPost("validate-token")] //ПРОВЕРЕНО
         public IActionResult ValidateToken([FromBody] string token)
         {
             if (string.IsNullOrEmpty(token))
@@ -1501,7 +1523,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok();
         }
 
-        [HttpPost("login")]
+        [HttpPost("login")] //ПРОВЕРЕНО
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
             var userTemp = await _context.Users.FirstOrDefaultAsync(u => u.username == model.username);
@@ -1517,10 +1539,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             (bool?, User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
             {
-                if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
+                if (_chiefsManager.IsChiefOnline(await GetDepartmentIdFromUserName(model.username)))
                 {
                     return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
                 }
+                /*if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
+                {
+                    return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
+                }*/ //Теперь проверка через NotificationHub!
 
                 try
                 {
@@ -1529,6 +1555,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     {
                         new Claim(ClaimTypes.Name, model.username),
                         new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
+                        new Claim("department_id", (await GetDepartmentIdFromUserName(model.username)).ToString()),
                     };
 
                     string secret = _configuration["JwtConfig:Secret"];
@@ -1561,7 +1588,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpPatch]
-        [Route("change_credentials")]
+        [Route("change_credentials")] //ПРОВЕРЕНО
         [Authorize]
         public async Task<IActionResult> ChangeCredentials([FromBody] UserCredentials credentials)
         {
@@ -1634,7 +1661,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [Authorize]
-        [HttpGet("securedata")]
+        [HttpGet("securedata")] //ПРОВЕРЕНО
         public IActionResult GetSecureData()
         {
             return Ok("Эта информация доступна только для всех авторизованных пользователей.");

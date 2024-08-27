@@ -8,6 +8,7 @@ using System.Text;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Hubs;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using System.Security.Cryptography.X509Certificates;
@@ -41,6 +42,8 @@ builder.Services.AddControllers()
         {
             options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
         });
+
+builder.Services.AddSignalR();
 
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -101,7 +104,28 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"]))
         };
+
+        // Enable SignalR JWT Authentication
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+
+                // If the request is for our SignalR hub
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    path.StartsWithSegments("/notificationHub"))
+                {
+                    // Read the token out of the query string
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
+
+
 
 builder.Services.AddAuthorization(options =>
 {
@@ -179,5 +203,11 @@ else
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+
+
+// Map your SignalR hub here
+app.MapHub<NotificationHub>("/notificationHub");
+
+
 app.MapControllers();
 app.Run();
