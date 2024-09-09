@@ -33,12 +33,12 @@ using DocumentFormat.OpenXml.Bibliography;
 using System.Data;
 using System.Timers;
 using System.Transactions;
-
 using System.Data.SqlClient;
 using Department = Kotova.CommonClasses.Department;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using System.Globalization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 
 //Movig to schema in databases after that
 
@@ -91,23 +91,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private readonly ApplicationDbContextUsers _userContext;
         private readonly ApplicationDBContextTechnicalDepartment _contextTechnicalDepartment;
         private readonly ApplicationDBContextManagement _contextManagement;
-        private List<bool> ChiefsAreOnline = new List<bool>();
 
         public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment, ApplicationDBContextManagement contextManagement)
         {
-
             _dataService = dataService;
             _contextGeneralConstr = contextGeneralConstr;
             _userContext = userContext;
             _contextTechnicalDepartment = contextTechnicalDepartment;
             _contextManagement = contextManagement;
-
         }
 
 
         [Authorize]
         [HttpGet("greeting")] //ИСПРАВЛЕНО
-        public IActionResult GetGreeting()
+        public async Task<IActionResult> GetGreeting()
         {
             return Ok("Привет, мир!");
         }
@@ -136,7 +133,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 .Where(u => u.username == userName)
                 .Select(u => u.current_personnel_number)
                 .FirstOrDefaultAsync();
-            if (tableNameForUser == null) { return BadRequest($"Не найден персоналный номер для данного пользователя. Подождите пока появится персональный номер?"); }
+            if (tableNameForUser == null) { return BadRequest($"Не найден персоналный номер для данного пользователя. Подождите пока появится персональный номер"); }
             int? departmentId = await _userContext.Users
                    .Where(u => u.username == userName)
                    .Select(u => u.department_id)
@@ -287,9 +284,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                     if (instruction.type_of_instruction == 0)
                     {
-                        Console.WriteLine("NOT IMPLEMENTED! COMPLETE THE CODE PLEASE :)");
-                        /*await transaction.RollbackAsync();
-                        return false;*/ //НЕ знаю, может быть зря я это закоментировал?
+                        
                     }
 
                     // Step 2: Update the user's instruction record
@@ -338,6 +333,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             return value;
         }
+
+        
+
 
         [HttpPost("upload")] //ПОКА НЕ АКТУАЛЬНО!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
@@ -755,6 +753,85 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return newestFile.FullName;
         }
 
+
+        [HttpPost("send-unplanned-instruction-to-chiefs")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> SubmitUnplannedInstruction([FromBody] UnplannedInstructionPackage package) 
+        {
+            try
+            {
+                if (package == null)
+                {
+                    return BadRequest("Пустые входные данные.");
+                }
+
+                List<string>? departmentsNames = package.DepartmentNames;
+
+                if (departmentsNames == null)
+                {
+                    return BadRequest("Список отделов пусты на сервере");
+                }
+                foreach (var departmentName in departmentsNames)
+                {
+                    int? departmentId = await _userContext.Departments
+                        .Where(d => d.department_name == departmentName)
+                        .Select(d => d.department_id)
+                        .FirstOrDefaultAsync();
+                    if (departmentId == null)
+                    {
+                        return NotFound("Указанный отдел не найден, странно. Проверь что названия правильно указаны!");
+                    }
+                    int departmentIdNotNull = departmentId.Value;
+                    var result = await AddNewInstructionInternal(package.FullInstruction, departmentIdNotNull);
+
+                    if (!result.Success)
+                    {
+                        Console.WriteLine(result.ErrorMessage);
+                        return BadRequest("Что-то пошло не так с добавлением инструкций в отдел. Обратитесь к администратору!");
+                    }
+
+                    if (departmentId == 5) //Это значит, что начальство
+                    {
+                        continue; //Просто skip для начальства, там не нужно назначать начальнику ничего!
+                    }
+
+                    FullCustomInstruction fullInstrForAssignment = new FullCustomInstruction(result.Instruction, package.FullInstruction._paths);
+
+                    List<string?> PNofChiefsOfDepartment = await _userContext.Users
+                        .Where(u => u.department_id == departmentIdNotNull && u.user_role == 2) // 2 равено роли начальника отдела (Chief of department)
+                        .Select(u => u.current_personnel_number)
+                        .ToListAsync();
+                    if (!PNofChiefsOfDepartment.Any())
+                    {
+                        Console.WriteLine("Начальники для данного отдела не найдены!");
+                        continue;
+                    }
+                    foreach (string personnelNumber in PNofChiefsOfDepartment)
+                    {
+                        var result2 = await AssignNewInstructionToUser(fullInstrForAssignment, departmentId, personnelNumber);
+                        if (result2)
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            Console.WriteLine("something went wrong");
+                            return BadRequest("Что-то пошло не так с назначением начальникам!");
+                        }
+                    }
+
+                }
+                
+
+                return Ok("Инструктажи добавлены в отдел.");
+            }
+            catch (Exception ex)
+            {
+                // Log the error (not shown here for brevity)
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
         [HttpPost("add-new-instruction-into-db")] //ПРОВЕРЕНО.
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] FullCustomInstruction fullInstruction)
@@ -766,8 +843,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return Unauthorized("Username claim of Chief not found.");
                 }
-
-                var result = await AddNewInstructionInternal(fullInstruction, username);
+                int departmentId = await GetDepartmentIdFromUserName(username);
+                var result = await AddNewInstructionInternal(fullInstruction, departmentId);
 
                 if (result.Success)
                 {
@@ -785,12 +862,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<(bool Success, Instruction Instruction, string ErrorMessage)> AddNewInstructionInternal(FullCustomInstruction fullInstruction, string username)
+        private async Task<(bool Success, Instruction Instruction, string ErrorMessage)> AddNewInstructionInternal(FullCustomInstruction fullInstruction, int departmentId)
         {
             try
             {
-                Instruction instruction = fullInstruction._instruction;
+                Instruction originalInstruction = fullInstruction._instruction;
                 List<string> paths = fullInstruction._paths;
+
+
+                // Create a new instruction for each department to avoid reusing the same instruction_id
+                Instruction instruction = new Instruction
+                {
+                    instruction_id = originalInstruction.instruction_id,
+                    cause_of_instruction = originalInstruction.cause_of_instruction,
+                    begin_date = originalInstruction.begin_date,
+                    end_date = originalInstruction.end_date,
+                    path_to_instruction = originalInstruction.path_to_instruction,
+                    type_of_instruction = originalInstruction.type_of_instruction,
+                    is_passed_by_everyone = originalInstruction.is_passed_by_everyone,
+                    is_assigned_to_people = originalInstruction.is_assigned_to_people
+                };
+
 
                 List<FilePath> pathsOfFilePath = paths.Select(path => new FilePath
                 {
@@ -799,7 +891,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 instruction.begin_date = DateTime.UtcNow;
 
-                int departmentId = await GetDepartmentIdFromUserName(username);
                 var dbContext = GetDbContextForDepartment(departmentId);
                 if (dbContext == null)
                 {
@@ -1083,8 +1174,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     _instruction = initialInstruction,
                     _paths = new List<string?> { null }
                 };
-
-                var result = await AddNewInstructionInternal(fullCustomInstruction, user.username);
+                if (departmentId == null)
+                {
+                    Console.WriteLine("DepartmentID is null! in FindNewEmployeeAnd...");
+                    return;
+                }
+                var departmentIdNotNull = departmentId.Value;
+                var result = await AddNewInstructionInternal(fullCustomInstruction, departmentIdNotNull);
 
                 if (!result.Success)
                 {
@@ -1092,7 +1188,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 else
                 {
-                    var result2 = await AssignNewInstructionToUser(fullCustomInstruction, departmentId, personnelNumber);
+                    FullCustomInstruction newFullInstr = new FullCustomInstruction(result.Instruction, fullCustomInstruction._paths);
+                    var result2 = await AssignNewInstructionToUser(newFullInstr, departmentIdNotNull, personnelNumber);
                 }
             }
             catch (Exception ex)
@@ -1429,8 +1526,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 _userContext = userContext;
 
                 Random random = new Random();
+
+
                 int randomNumber = random.Next(1000000, 9999999);
                 Login = $"User{randomNumber}";
+                while (userContext.Users.Where(r => r.username == Login).Any())
+                {
+                    randomNumber = random.Next(1000000, 9999999);
+                    Login = $"User{randomNumber}";
+                }
                 Password = Login;
                 HashedPassword = Encryption_Kotova.HashPassword(Password);
                 UserRoleIndex = IndexFromUserRole(userRole);
@@ -1471,236 +1575,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return $"Personnel Number: {PersonnelNumber}, Login: {Login}, Password: {Password}";
             }
         }
+        
     }
+    
 
-    public class AuthenticationController : ControllerBase
-    {
-        private readonly LegacyAuthenticationService _legacyAuthService;
-        private readonly IConfiguration _configuration;
-        private readonly ApplicationDbContextUsers _context;
-        private readonly ChiefsManager _chiefsManager;
-        private readonly JwtTokenValidator _jwtTokenValidator;
-        public AuthenticationController(LegacyAuthenticationService legacyAuthService, IConfiguration configuration, ApplicationDbContextUsers context, ChiefsManager chiefsManager, JwtTokenValidator jwtTokenValidator)
-        {
-            _legacyAuthService = legacyAuthService;
-            _configuration = configuration;
-            _context = context;
-            _chiefsManager = chiefsManager;
-            _jwtTokenValidator = jwtTokenValidator;
-        }
 
-        private async Task<int> GetDepartmentIdFromUserName(string username)
-        {
-            var user = await _context.Users
-            .Where(u => u.username == username)
-            .Select(u => new { u.department_id })
-            .FirstOrDefaultAsync();
-            if (user == null)
-            {
-                return -1;
-            }
-            return user.department_id;
-        }
-
-        [HttpPost("validate-token")] //ПРОВЕРЕНО
-        public IActionResult ValidateToken([FromBody] string token)
-        {
-            if (string.IsNullOrEmpty(token))
-            {
-                Console.WriteLine("Token is null or empty.");
-                return Unauthorized("Валидация не прошла. Токен пуст или отсутсвует.");
-            }
-
-            var principal = _jwtTokenValidator.ValidateToken(token);
-
-            if (principal == null)
-            {
-                Console.WriteLine("Token validation failed.");
-                return Unauthorized("Валидация не прошла, неправильный токен.");
-            }
-
-            Console.WriteLine("Token validation succeeded.");
-            return Ok();
-        }
-
-        [HttpPost("login")] //ПРОВЕРЕНО
-        public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
-        {
-            var userTemp = await _context.Users.FirstOrDefaultAsync(u => u.username == model.username);
-            if (userTemp == null)
-            {
-                return BadRequest($"Пользователь с именем '{model.username}' не был найден");
-            }
-            if (model.time_for_being_authenticated <= 0)
-            {
-                return BadRequest("Время, выбранное для аутентификации недопустимо.");
-            }
-
-            (bool?, User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
-            if (authenticationModel.Item1 == true)
-            {
-                if (_chiefsManager.IsChiefOnline(await GetDepartmentIdFromUserName(model.username)))
-                {
-                    return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
-                }
-                /*if (await _chiefsManager.IsChiefOnlineAsync(authenticationModel.Item2.department_id))
-                {
-                    return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
-                }*/ //Теперь проверка через NotificationHub!
-
-                try
-                {
-                    var user = authenticationModel.Item2;
-                    var claims = new List<Claim>
-                    {
-                        new Claim(ClaimTypes.Name, model.username),
-                        new Claim(ClaimTypes.Role, RoleModelIntToString(user.user_role)),
-                        new Claim("department_id", (await GetDepartmentIdFromUserName(model.username)).ToString()),
-                    };
-
-                    string secret = _configuration["JwtConfig:Secret"];
-                    var token = GenerateJwtToken(claims, secret, model.time_for_being_authenticated);
-
-                    return Ok(new { Token = token, Message = "Успешный вход." });
-                }
-                catch (ArgumentException ex)
-                {
-                    return BadRequest(ex.Message);
-                }
-            }
-            else if (authenticationModel.Item1 == null)
-            {
-                return Unauthorized("У пользователя нет персонального номера. Подождите пока он появится.");
-            }
-            else
-            {
-                return Unauthorized("Аутентификация не успешна. Вход не выполнен.");
-            }
-        }
-
-        public IActionResult CustomForbid(string message)
-        {
-            var result = new ObjectResult(new { Message = message })
-            {
-                StatusCode = (int)HttpStatusCode.Forbidden
-            };
-            return result;
-        }
-
-        [HttpPatch]
-        [Route("change_credentials")] //ПРОВЕРЕНО
-        [Authorize]
-        public async Task<IActionResult> ChangeCredentials([FromBody] UserCredentials credentials)
-        {
-            var authorizationHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
-            string jwtToken = authorizationHeader?.StartsWith("Bearer ") == true ? authorizationHeader.Substring("Bearer ".Length).Trim() : null;
-            if (string.IsNullOrEmpty(jwtToken))
-            {
-                return BadRequest("JWT token is null or empty");
-            }
-            string user = User.FindFirst(ClaimTypes.Name)?.Value;
-            if (string.IsNullOrWhiteSpace(user))
-            {
-                return BadRequest("User is null or empty");
-            }
-
-            CredentialValidation credentialValidation = new CredentialValidation();
-            if (credentialValidation.CheckForValidation(credentials, user))
-            {
-                try
-                {
-                    return await UpdateCredentialsForUserInDB(credentials, user);
-                }
-                catch
-                {
-                    return BadRequest("Не смогли обновить новые данные для пользователя. Что-то пошло не так.");
-                }
-            }
-            else
-            {
-                return BadRequest("Валидация данных не пройдена. Перепроверьте указанные данные");
-            }
-        }
-
-        private async Task<IActionResult> UpdateCredentialsForUserInDB(UserCredentials credentials, string user)
-        {
-            using (var transaction = await _context.Database.BeginTransactionAsync())
-            {
-                try
-                {
-                    var newUserExistInDB = await _context.Users.FirstOrDefaultAsync(u => u.username == credentials.Login);
-                    if (newUserExistInDB != null && credentials.Login != user)
-                    {
-                        return BadRequest("Пользователь с таким именем уже существует.");
-                    }
-
-                    var userToUpdate = await _context.Users.FirstOrDefaultAsync(u => u.username == user);
-
-                    if (userToUpdate != null)
-                    {
-                        userToUpdate.username = credentials.Login;
-                        userToUpdate.password_hash = Encryption_Kotova.HashPassword(credentials.Password);
-                        userToUpdate.current_email = credentials.Email;
-
-                        await _context.SaveChangesAsync();
-                        await transaction.CommitAsync();
-                        return Ok();
-                    }
-                    else
-                    {
-                        throw new Exception("Пользователь не найден");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    await transaction.RollbackAsync();
-                    Console.WriteLine($"An error occurred: {ex.Message}");
-                    return StatusCode(500, "Internal server error. Please try again later.");
-                }
-            }
-        }
-
-        [Authorize]
-        [HttpGet("securedata")] //ПРОВЕРЕНО
-        public IActionResult GetSecureData()
-        {
-            return Ok("Эта информация доступна только для всех авторизованных пользователей.");
-        }
-
-        private string RoleModelIntToString(int user_role)
-        {
-            return user_role switch
-            {
-                1 => "User",
-                2 => "ChiefOfDepartment",
-                3 => "Coordinator",
-                4 => "Management",
-                5 => "Administrator",
-                _ => throw new ArgumentException($"Роль под номером: {user_role} не допустима, что-то пошло не так!")
-            };
-        }
-
-        private bool CheckForValidPersonnelNumber(string input)
-        {
-            string pattern = @"^\d{10}$";
-            return Regex.IsMatch(input, pattern);
-        }
-
-        public string GenerateJwtToken(List<Claim> claims, string secret, int timeForExpiration)
-        {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: "yourdomain.com",
-                audience: "yourdomain.com",
-                claims: claims,
-                expires: DateTime.Now.AddMinutes(timeForExpiration),
-                signingCredentials: creds);
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-    }
 }
 
 

@@ -58,6 +58,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Hubs
 
             await base.OnDisconnectedAsync(exception);
         }
+
+
+        [Authorize(Roles = "Administrator")]
+        public async Task SendMessageToEveryone(string user, string message)
+        {
+            // Sends the message to all connected clients
+            await Clients.All.SendAsync("ReceiveMessage", "Администратор", message);
+        }
+
+        /*[Authorize(Roles = "Administrator")]
+        public async Task SendMessage(string user_from, string message, string user_to)
+        {
+            await Clients.User(user_to).SendAsync("ReceiveMessage", user_from, message);
+        }*/ // В РАЗРАБОТКЕ, ПОКА НЕ АКТУАЛЬНО
     }
 
 }

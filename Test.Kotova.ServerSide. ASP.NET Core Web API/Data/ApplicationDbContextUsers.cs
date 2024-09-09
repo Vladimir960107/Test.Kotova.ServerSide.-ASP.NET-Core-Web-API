@@ -11,6 +11,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
         public DbSet<User>? Users { get; set; }
         public DbSet<Department> Departments { get; set; }
         public DbSet<Role> Roles { get; set; }
+        public DbSet<TaskForUser> Tasks { get; set; }
 
         public ApplicationDbContextUsers(DbContextOptions<ApplicationDbContextUsers> options)
             : base(options) { }
@@ -35,7 +36,19 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 entity.ToTable("Roles", "UsersSchema");
             });
 
-            // Add configurations for all your entities as needed
+            modelBuilder.Entity<TaskForUser>(entity =>
+            {
+                entity.ToTable("Tasks", "UsersSchema"); // Specify the schema
+
+                entity.Property(t => t.CreatedAt)
+                    .HasDefaultValueSql("GETDATE()");
+
+                entity.Property(t => t.Status)
+                    .HasDefaultValue("Не назначено");
+
+                entity.Property(t => t.IsDeleted)
+                    .HasDefaultValue(false);
+            });
         }
     }
 }
