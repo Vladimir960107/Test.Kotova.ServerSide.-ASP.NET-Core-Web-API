@@ -39,6 +39,9 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using System.Globalization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
+using System.Xml.Schema;
+using System.Linq;
+using DocumentFormat.OpenXml.Office2010.Drawing.Charts;
 
 //Movig to schema in databases after that
 
@@ -148,7 +151,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private async Task<object> ReadDataFromDynamicTable(string tableName, int departmentId)
         {
-            var context = GetDbContextForDepartment(departmentId);
+            var context = GetDbContextForDepartmentId(departmentId);
             if (context == null)
             {
                 throw new ArgumentException("Invalid departmentId");
@@ -246,7 +249,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         private async Task<bool> PassInstructionIntoDb(Dictionary<string, object> jsonDictionary, string personnelNumberForUser, int departmentId)
         {
-            var context = GetDbContextForDepartment(departmentId); // Replace this with your actual method to get the context based on departmentId
+            var context = GetDbContextForDepartmentId(departmentId); // Replace this with your actual method to get the context based on departmentId
             if (context == null)
             {
                 throw new ArgumentException("Invalid departmentId");
@@ -451,6 +454,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                string? PNOfCurrentUser = await _userContext.Users
+                    .Where(u => u.username == username)
+                    .Select(u => u.current_personnel_number)
+                    .FirstOrDefaultAsync();
+
+
                 if (string.IsNullOrEmpty(username))
                 {
                     return Unauthorized("Username claim of Chief not found.");
@@ -459,14 +468,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 int departmentId = await GetDepartmentIdFromUserName(username);
 
 
-                ApplicationDBContextBase? dbContext = GetDbContextForDepartment(departmentId);
+                ApplicationDBContextBase? dbContext = GetDbContextForDepartmentId(departmentId);
                 if (dbContext == null)
                 {
                     return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
                 List<Tuple<string, string>> namesAndBirthDates = await dbContext.Department_employees
-             .Select(e => new Tuple<string, string>(e.full_name, e.birth_date.ToString("yyyy-MM-dd")))
-             .ToListAsync();
+                    .Where(e => e.job_position != "Начальник отдела" && e.personnel_number != PNOfCurrentUser)
+                     .Select(e => new Tuple<string, string>(e.full_name, e.birth_date.ToString("yyyy-MM-dd")))
+                     .ToListAsync();
                 return Ok(Encryption_Kotova.EncryptListOfTuples(namesAndBirthDates));
             }
             catch (Exception ex)
@@ -476,7 +486,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
 
-        private ApplicationDBContextBase GetDbContextForDepartment(int departmentId)
+        private ApplicationDBContextBase GetDbContextForDepartmentId(int departmentId)
         {
             return departmentId switch
             {
@@ -500,13 +510,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
                 List<Instruction> instructions = new List<Instruction>();
                 int departmentId = await GetDepartmentIdFromUserName(username);
-                var dbContext = GetDbContextForDepartment(departmentId);
+                var dbContext = GetDbContextForDepartmentId(departmentId);
                 if (dbContext == null)
                 {
                     return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
                 instructions = await dbContext.Instructions
-                    .Where(i => i.is_assigned_to_people == false)
+                    .Where(i => i.is_assigned_to_people == false && i.type_of_instruction == 1)
                     .ToListAsync();
                 var serialized = JsonConvert.SerializeObject(instructions);
                 var encryptedData = Encryption_Kotova.EncryptString(serialized);
@@ -538,7 +548,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                    .Where(u => u.username == username)
                    .Select(u => u.department_id)
                    .FirstOrDefaultAsync();
-            ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentId);
+            ApplicationDBContextBase dbContext = GetDbContextForDepartmentId(departmentId);
 
             if (dbContext == null) { return BadRequest("Отдел для данного человека не найден! send-instruction-to-names failed."); }
 
@@ -803,7 +813,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         .ToListAsync();
                     if (!PNofChiefsOfDepartment.Any())
                     {
-                        Console.WriteLine("Начальники для данного отдела не найдены!");
+                        Console.WriteLine($"Начальники для данного отдела: {departmentName} не найдены!");
                         continue;
                     }
                     foreach (string personnelNumber in PNofChiefsOfDepartment)
@@ -815,7 +825,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         }
                         else
                         {
-                            Console.WriteLine("something went wrong");
+                            Console.WriteLine("something went wrong in Submit unplanned instructions");
                             return BadRequest("Что-то пошло не так с назначением начальникам!");
                         }
                     }
@@ -891,7 +901,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 instruction.begin_date = DateTime.UtcNow;
 
-                var dbContext = GetDbContextForDepartment(departmentId);
+                var dbContext = GetDbContextForDepartmentId(departmentId);
                 if (dbContext == null)
                 {
                     return (false, null, "Not Implemented case in function AddNewInstructionInternal, check for error there");
@@ -952,7 +962,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 List<Dept> deptList = new List<Dept>();
                 foreach (var department in departments)
                 {
-                    using (var dbContext = GetDbContextForDepartment(department.department_id))
+                    using (var dbContext = GetDbContextForDepartmentId(department.department_id))
                     {
                         Dept new_dept = new Dept();
                         new_dept.Name = department.department_name;
@@ -1159,6 +1169,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return;
                 }
 
+                int userRole = user.user_role;
+
                 var initialInstruction = new Instruction
                 {
                     cause_of_instruction = $"Вводный инструктаж для {personnelNumber}",
@@ -1189,13 +1201,60 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 else
                 {
                     FullCustomInstruction newFullInstr = new FullCustomInstruction(result.Instruction, fullCustomInstruction._paths);
-                    var result2 = await AssignNewInstructionToUser(newFullInstr, departmentIdNotNull, personnelNumber);
+                    bool result2 = await AssignNewInstructionToUser(newFullInstr, departmentIdNotNull, personnelNumber);
+                    if (result2)
+                    {
+                        if (userRole != 2 || user.department_id != 5) //Здесь мы режем, что НЕ начальство и НЕ руководитель отдела! TODO: Перевести в UsersSchema.roles = chiefofdepartment.
+                        {
+                            var result3 = await CreateTaskForChiefForPrimaryInstr(departmentIdNotNull, personnelNumber);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.ToString());
             }
+        }
+
+        private async Task<IActionResult> CreateTaskForChiefForPrimaryInstr(int departmentIdNotNull, string personnelNumber)
+        {
+            ApplicationDBContextBase dbContext = GetDbContextForDepartmentId(departmentIdNotNull);
+            string? FullName = await dbContext.Department_employees
+                .Where(u => u.personnel_number == personnelNumber)
+                .Select(u => u.full_name)
+                .FirstOrDefaultAsync();
+            if (FullName == null)
+            {
+                throw new Exception("Не найден пользователь с таким персональным номером!");
+            }
+
+            DateTime dueDate = DateTime.Now.Date;
+
+            string description = $"Создайте первичный инструктаж для человека под именем: {FullName} до {dueDate.ToString("dd-MM-yyyy")}";
+
+            
+            int userRole = 2; //Значит, что начальник отдела TODO: Можешь исправить, чтобы считывалось из базы данных. Но не сильно важно.
+
+            
+
+            // Create a new task for the user
+            var newTask = new TaskForUser
+            {
+                Description = description,
+                DepartmentId = departmentIdNotNull,
+                UserRole = userRole,  
+                AssignedTo = null,    // No specific user assigned
+                CreatedAt = DateTime.Now,
+                DueDate = dueDate,
+                Status = "Назначено"
+            };
+
+            // Add the task to the database
+            _userContext.Tasks.Add(newTask);
+            await _userContext.SaveChangesAsync();
+
+            return Ok();
         }
 
         private async Task<bool> AssignNewInstructionToUser(FullCustomInstruction fullCustomInstruction, int? departmentId, string personnelNumber)
@@ -1212,7 +1271,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string schemaName = GetSchemaName(departmentIdNotNull);
             if (schemaName == "dbo") return false;
 
-            ApplicationDBContextBase dbContext = GetDbContextForDepartment(departmentIdNotNull);
+            ApplicationDBContextBase dbContext = GetDbContextForDepartmentId(departmentIdNotNull);
             if (dbContext == null) return false;
 
             try
@@ -1369,7 +1428,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             int departmentId = await GetDepartmentIdFromUserName(username);
 
-            var dbContext = GetDbContextForDepartment(departmentId);
+            var dbContext = GetDbContextForDepartmentId(departmentId);
             if (dbContext == null)
             {
                 return NotFound("для данного начальника не найден отдел! (GetNotPassedInstructionForChief)");
@@ -1505,6 +1564,157 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 Console.WriteLine(ex);
                 return BadRequest("Упс, что-то пошло не так в CheckPassingTheInstructionsByChief, проверь!");
             }
+        }
+
+        [HttpPost("instructions-data-export")]
+        [Authorize(Roles = "ChiefOfDepartment, Coordinator, Manager, Administrator")]
+        public async Task<IActionResult> InstructionsDataExport([FromBody] InstructionExportRequest instructionExportRequest)
+        {
+
+            var startDate = instructionExportRequest.StartDate;
+            var endDate = instructionExportRequest.EndDate;
+
+            if (instructionExportRequest == null)
+            {
+                return BadRequest("instructionsDataExport - пуст, ошибка");
+            }
+
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+            var userName = User.FindFirst(ClaimTypes.Name)?.Value;
+
+            var PNofUser = await _userContext.Users
+                .Where(u => u.username == userName)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
+
+            List<Byte> typesOfInstruction = instructionExportRequest.InstructionTypes;
+            string typesOfInstructionString = string.Join(",", typesOfInstruction);
+
+            var department_idString = User.FindFirst("department_id")?.Value;
+            if (department_idString == null || userRole == null)
+            {
+                return BadRequest("Ваш отдел или роль не найдена!");
+            }
+            int department_id = Int32.Parse(department_idString);
+
+            ApplicationDBContextBase departmentDbContext = GetDbContextForDepartmentId(department_id);
+
+            var PNOfChief = await departmentDbContext.Department_employees
+                        .Where(e => e.job_position == "Начальник отдела")
+                        .Select(e => e.personnel_number)
+                        .FirstOrDefaultAsync();
+
+            if (departmentDbContext == null)
+            {
+                return BadRequest("Не найден dbContext для данного user-а");
+            }
+            List<InstructionExportInstance> listOfInstructions = new List<InstructionExportInstance>();
+            string schema = GetSchemaName(department_id);
+            if (schema == null)
+            {
+                return BadRequest("Не найдена schema для данного user-а");
+            }
+            if (userRole == "User") // Если пользователь  - User, то выкидываем его :)
+            {
+                return Unauthorized("Как ты сюда попал, User? :)");
+            }
+            else if (userRole == "ChiefOfDepartment") 
+            {
+                List<string> PNtables = departmentDbContext.GetTenDigitTableNames(schema);
+
+                
+                foreach (string pnTable in PNtables)
+                {
+                    //if (pnTable.Split('.')[1] == PNofUser) //ПЛОХОЙ ВАРИАНТ ГДЕ МЫ УБИРЕМ ТОЛЬКО САМОГО СОТРУДНИКА.
+                    if (pnTable.Split('.')[1] == PNOfChief)
+                    {
+                        continue;
+                    }
+                    string schemaName = pnTable.Split('.')[0];
+                    string tenDigitName = pnTable.Split('.')[1];
+                    var personnelNumberParam = new Microsoft.Data.SqlClient.SqlParameter("@tenDigitName", tenDigitName);
+
+
+                    List<InstructionExportInstance> justSomeInstructions = await departmentDbContext.Set<InstructionExportInstance>()
+                     .FromSqlRaw($@"
+                        SELECT 
+                            ei.instruction_id AS InstructionId,
+                            ei.date_when_passed AS DateWhenPassedByEmployee, 
+                            de.full_name AS FullNameOfEmployee, 
+                            de.job_position AS PositionOfEmployee, 
+                            de.birth_date AS BirthDateOfEmployee, 
+                            e.type_of_instruction AS InstructionType, 
+                            e.cause_of_instruction AS CauseOfInstruction, 
+                            ei.was_signed_by_PN AS FullNameOfEmployeeWhoConductedInstruction
+                        FROM [{schemaName}].[{tenDigitName}] ei
+                        JOIN [{schemaName}].Instructions e ON ei.instruction_id = e.instruction_id
+                        JOIN [{schemaName}].Department_employees de ON de.personnel_number = {tenDigitName}
+                        WHERE ei.is_instruction_passed = 1
+                        AND e.type_of_instruction IN ({typesOfInstructionString})
+                        AND ei.date_when_passed BETWEEN @startDate AND @endDate",
+                         new Microsoft.Data.SqlClient.SqlParameter("@startDate", startDate),
+                         new Microsoft.Data.SqlClient.SqlParameter("@endDate", endDate))
+                     .ToListAsync();
+
+
+
+                    if (justSomeInstructions.IsNullOrEmpty()) { continue; }
+                    foreach (var instance in justSomeInstructions)
+                    {
+                        var PNOfEmployeeWhoConductedInstruction = instance.FullNameOfEmployeeWhoConductedInstruction; //Its actually just currentPN of someone who conductedInstruction
+                        var departmentIdOfEmployeeWhoConductedInstruction = await _userContext.Users.Where(u => u.current_personnel_number == PNOfEmployeeWhoConductedInstruction)
+                            .Select(u => u.department_id).FirstOrDefaultAsync();
+
+                        var dbContextOfWhoConductedInstruction = GetDbContextForDepartmentId(departmentIdOfEmployeeWhoConductedInstruction);
+                        var employeeDetailsOfSomeoneWhoConductedInstruction = await dbContextOfWhoConductedInstruction.Department_employees.Where(d => d.personnel_number == PNOfEmployeeWhoConductedInstruction)
+                            .Select(u => new
+                            {
+                                CombinedDetails = u.full_name + " - " + u.job_position
+                            })
+                            .FirstOrDefaultAsync();
+
+                        instance.FullNameOfEmployeeWhoConductedInstruction = employeeDetailsOfSomeoneWhoConductedInstruction.CombinedDetails;
+
+
+
+                        var filePaths = await departmentDbContext.FilePaths
+                            .Where(fp => fp.instruction_id == instance.InstructionId)
+                            .Select(fp => fp.file_path ?? string.Empty) 
+                            .ToListAsync();
+
+                        if (filePaths.Any())
+                        {
+                            if (instance.FileNamesOfInstruction == null)
+                            {
+                                instance.FileNamesOfInstruction = new List<string>();
+                            }
+                            instance.FileNamesOfInstruction.AddRange(filePaths);
+                        }
+                        else
+                        {
+                            instance.FileNamesOfInstruction = null;
+                        }
+
+                        string fileNames = ""; 
+                        for (int i = 0; i < filePaths.Count; i++)
+                        {
+                            string[] filepathTemp = filePaths[i].Split("\\");
+                            string fileName = filepathTemp[filepathTemp.Length - 1];
+                            if (i == (filepathTemp.Length-1)) 
+                            {
+                                fileNames += fileName;
+                                break;
+                            }
+                            fileNames += (fileName + " ");
+                        }
+                        instance.FileNamesOfInstructionInOneString = fileNames;
+
+                    }
+                    listOfInstructions.AddRange(justSomeInstructions);
+                }
+            }
+            return Ok(listOfInstructions);
         }
 
         public class UserTemp

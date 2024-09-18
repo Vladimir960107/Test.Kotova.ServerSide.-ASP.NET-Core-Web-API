@@ -8,6 +8,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
         public DbSet<Instruction> Instructions { get; set; }
         public DbSet<Employee> Department_employees { get; set; }
         public DbSet<FilePath> FilePaths { get; set; }
+        public DbSet<InstructionExportInstance> InstructionExportInstances { get; set; }
 
         protected ApplicationDBContextBase(DbContextOptions options)
             : base(options)
@@ -16,8 +17,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            base.OnModelCreating(modelBuilder);
-
+            
             modelBuilder.Entity<Instruction>()
                 .HasKey(i => i.instruction_id);
 
@@ -50,6 +50,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<DynamicEmployeeInstruction>().HasNoKey();
+            modelBuilder.Entity<InstructionExportInstance>().HasNoKey();
+            base.OnModelCreating(modelBuilder);
         }
         public List<string> GetTenDigitTableNames(string schemaName = null)
         {

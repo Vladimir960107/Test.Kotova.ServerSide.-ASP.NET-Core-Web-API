@@ -1,7 +1,9 @@
-﻿using Kotova.CommonClasses;
+﻿using DocumentFormat.OpenXml.Bibliography;
+using Kotova.CommonClasses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.VisualBasic;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
@@ -72,5 +74,35 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             return Ok(newTask);
         }
+        [Authorize(Roles = "Administrator")]
+        [HttpPost("create-custom-task")]
+        public async Task<IActionResult> CreateCustomTask([FromBody] CustomTask someInfoAboutNewUser)
+        {
+            try
+            {
+                var newTask = new TaskForUser
+                {
+                    Description = someInfoAboutNewUser.Description,
+                    DepartmentId = someInfoAboutNewUser.DepartmentId,
+                    UserRole = someInfoAboutNewUser.UserRole,  // Assign the user role
+                    AssignedTo = someInfoAboutNewUser.AssignedTo,    // No specific user assigned
+                    CreatedAt = DateTime.Now,
+                    DueDate = someInfoAboutNewUser.DueDate,
+                    Status = someInfoAboutNewUser.Status,
+                };
+                _userContext.Tasks.Add(newTask);
+                await _userContext.SaveChangesAsync();
+
+                return Ok(newTask);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                return BadRequest(ex.Message);
+                
+            }
+            
+        }
+
     }
 }
