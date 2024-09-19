@@ -1576,7 +1576,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             if (instructionExportRequest == null)
             {
-                return BadRequest("instructionsDataExport - пуст, ошибка");
+                return BadRequest("instructionsDataExport - пуст, ошибка!");
             }
 
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
@@ -1600,7 +1600,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             ApplicationDBContextBase departmentDbContext = GetDbContextForDepartmentId(department_id);
 
-            var PNOfChief = await departmentDbContext.Department_employees
+            var PNOfChief = await departmentDbContext.Department_employees //Выкидываем только начальника отдела!
                         .Where(e => e.job_position == "Начальник отдела")
                         .Select(e => e.personnel_number)
                         .FirstOrDefaultAsync();
@@ -1660,11 +1660,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
                     if (justSomeInstructions.IsNullOrEmpty()) { continue; }
+
+                    var itemsToRemove = new List<InstructionExportInstance>();
+
                     foreach (var instance in justSomeInstructions)
                     {
                         var PNOfEmployeeWhoConductedInstruction = instance.FullNameOfEmployeeWhoConductedInstruction; //Its actually just currentPN of someone who conductedInstruction
                         var departmentIdOfEmployeeWhoConductedInstruction = await _userContext.Users.Where(u => u.current_personnel_number == PNOfEmployeeWhoConductedInstruction)
                             .Select(u => u.department_id).FirstOrDefaultAsync();
+
+                        if (departmentIdOfEmployeeWhoConductedInstruction == 5)
+                        {
+                            itemsToRemove.Add(instance);
+                            continue;
+                        }
 
                         var dbContextOfWhoConductedInstruction = GetDbContextForDepartmentId(departmentIdOfEmployeeWhoConductedInstruction);
                         var employeeDetailsOfSomeoneWhoConductedInstruction = await dbContextOfWhoConductedInstruction.Department_employees.Where(d => d.personnel_number == PNOfEmployeeWhoConductedInstruction)
@@ -1711,6 +1720,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         instance.FileNamesOfInstructionInOneString = fileNames;
 
                     }
+                    foreach (var item in itemsToRemove)
+                    {
+                        justSomeInstructions.Remove(item);
+                    }
+
                     listOfInstructions.AddRange(justSomeInstructions);
                 }
             }

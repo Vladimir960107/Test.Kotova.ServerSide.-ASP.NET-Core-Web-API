@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualBasic;
+using System.Security.Claims;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
@@ -28,7 +29,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _contextManagement = contextManagement;
         }
 
-        [Authorize]
+        /*[Authorize]
         [HttpGet("create-random-task")]
         public async Task<IActionResult> CreateTask()
         {
@@ -73,7 +74,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             await _userContext.SaveChangesAsync();
 
             return Ok(newTask);
-        }
+        }*/
         [Authorize(Roles = "Administrator")]
         [HttpPost("create-custom-task")]
         public async Task<IActionResult> CreateCustomTask([FromBody] CustomTask someInfoAboutNewUser)
@@ -102,6 +103,32 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 
             }
             
+        }
+        [Authorize(Roles = "ChiefOfDepartment")]
+        [HttpGet("get-all-current-tasks-for-chief")]
+        public async Task<IActionResult> GetAllCurrentTasksForChief()
+        {
+            try
+            {
+                int chiefDepartmentId = int.Parse(User.FindFirst("department_id")?.Value);
+
+                var result = await _userContext.Tasks
+                    .Where(t => t.DepartmentId == chiefDepartmentId && t.UserRole == 2) // 2 indicates ChiefOfDepartment
+                    .Select(t => new TaskDto
+                    {
+                        TaskId = t.TaskId,
+                        Description = t.Description
+                    })
+                    .ToListAsync();
+                return Ok(result);
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                return BadRequest(ex.Message);
+
+            }
         }
 
     }
