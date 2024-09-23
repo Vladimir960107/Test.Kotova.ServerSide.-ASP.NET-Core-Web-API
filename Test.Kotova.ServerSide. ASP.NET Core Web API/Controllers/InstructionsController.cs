@@ -1572,7 +1572,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
 
             var startDate = instructionExportRequest.StartDate;
-            var endDate = instructionExportRequest.EndDate;
+            var endDate = instructionExportRequest.EndDate.AddDays(1);
 
             if (instructionExportRequest == null)
             {
@@ -1655,7 +1655,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         AND ei.date_when_passed BETWEEN @startDate AND @endDate",
                          new Microsoft.Data.SqlClient.SqlParameter("@startDate", startDate),
                          new Microsoft.Data.SqlClient.SqlParameter("@endDate", endDate))
-                     .ToListAsync();
+                     .ToListAsync(); //Вот эта sql выдала что никто не прошел, хотя 2 инструктажа пройдены. Проверяй! TODO: 
 
 
 

@@ -20,13 +20,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenAnyIP(5239); // Set HTTP port
-    serverOptions.ListenAnyIP(7052, listenOptions => // Set HTTPS port
+    /*serverOptions.ListenAnyIP(7052, listenOptions => // Set HTTPS port
     {
         listenOptions.UseHttps("C:/Users/hifly/Desktop/OpenSSL FireDaemon/certificate.pfx", "Test321!", configureOptions =>
         {
             configureOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
         });
-    });
+    });*/
 });
 
 Log.Logger = new LoggerConfiguration()
@@ -199,7 +199,7 @@ else
 }
 
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
