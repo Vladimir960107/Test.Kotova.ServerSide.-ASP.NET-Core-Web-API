@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Kotova.CommonClasses\Kotova.CommonClasses\Kotova.CommonClasses.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="Kotova.CommonClasses">
       <HintPath>..\..\Kotova.CommonClasses\Kotova.CommonClasses\bin\Debug\net6.0\Kotova.CommonClasses.dll</HintPath>
     </Reference>
