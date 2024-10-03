@@ -95,6 +95,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         public async Task<IActionResult> Login([FromBody] UserForAuthentication model)
         {
             var userTemp = await _context.Users.FirstOrDefaultAsync(u => u.username == model.username);
+
+            
             if (userTemp == null)
             {
                 return BadRequest($"Пользователь с именем '{model.username}' не был найден");
@@ -104,10 +106,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Время, выбранное для аутентификации недопустимо.");
             }
 
+            var userRole = userTemp.user_role;
+
             (bool?, User?) authenticationModel = _legacyAuthService.PerformLogin(userTemp, model.password);
             if (authenticationModel.Item1 == true)
             {
-                if (_chiefsManager.IsChiefOnline(await GetDepartmentIdFromUserName(model.username)))
+                if (userRole == 2 && _chiefsManager.IsChiefOnline(await GetDepartmentIdFromUserName(model.username)))
                 {
                     return CustomForbid("Начальник для текущего отдела уже авторизован. Попросите его закрыть приложение и авторизуйтесь спустя 1 минуту.");
                 }

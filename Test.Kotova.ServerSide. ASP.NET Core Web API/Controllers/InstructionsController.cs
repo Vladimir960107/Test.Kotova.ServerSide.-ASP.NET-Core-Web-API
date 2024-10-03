@@ -473,6 +473,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
                 }
+
                 List<Tuple<string, string>> namesAndBirthDates = await dbContext.Department_employees
                     .Where(e => e.job_position != "Начальник отдела" && e.personnel_number != PNOfCurrentUser)
                      .Select(e => new Tuple<string, string>(e.full_name, e.birth_date.ToString("yyyy-MM-dd")))
@@ -485,6 +486,45 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+
+        [HttpGet("sync-names-non-chief-with-db")] //ИСПРАВЛЕНО, ВРОДЕ ВСЁ РАБОТАЕТ!
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> SyncNamesOnlyForNonChiefUsersWithDB([FromServices] IConfiguration configuration)
+        {
+            try
+            {
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                string? PNOfCurrentUser = await _userContext.Users
+                    .Where(u => u.username == username)
+                    .Select(u => u.current_personnel_number)
+                    .FirstOrDefaultAsync();
+
+
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim of Chief not found.");
+                }
+
+                int departmentId = await GetDepartmentIdFromUserName(username);
+
+
+                ApplicationDBContextBase? dbContext = GetDbContextForDepartmentId(departmentId);
+                if (dbContext == null)
+                {
+                    return BadRequest("Not Implemented case in function AddNewInstructionIntoDB, check for error there");
+                }
+
+                List<Tuple<string, string>> namesAndBirthDates = await dbContext.Department_employees
+                    .Where(e => e.job_position != "Зам. начальника отдела" && e.job_position != "Начальник отдела" && e.personnel_number != PNOfCurrentUser)
+                     .Select(e => new Tuple<string, string>(e.full_name, e.birth_date.ToString("yyyy-MM-dd")))
+                     .ToListAsync();
+                return Ok(Encryption_Kotova.EncryptListOfTuples(namesAndBirthDates));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"An error occurred while processing your request: {ex.Message}");
+            }
+        }
 
         private ApplicationDBContextBase GetDbContextForDepartmentId(int departmentId)
         {
