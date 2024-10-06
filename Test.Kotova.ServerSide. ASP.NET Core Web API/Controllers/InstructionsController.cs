@@ -42,6 +42,7 @@ using Microsoft.AspNetCore.Authorization.Infrastructure;
 using System.Xml.Schema;
 using System.Linq;
 using DocumentFormat.OpenXml.Office2010.Drawing.Charts;
+using Microsoft.AspNetCore.Identity;
 
 //Movig to schema in databases after that
 
@@ -659,7 +660,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         }
 
                         // Step 4: Send notification to people
-                        var isEverythingFine = await SendNotificationToPeopleAsync(personnelNumbers, instruction.instruction_id, dbContext, PNOfSignedBy);
+                        var isEverythingFine = await SendInstructionToPeopleAsync(personnelNumbers, instruction.instruction_id, dbContext, PNOfSignedBy);
 
                         if (!isEverythingFine)
                         {
@@ -723,7 +724,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return (names, birthDates);
         }
 
-        private async Task<bool> SendNotificationToPeopleAsync(List<string> personnelNumbers, int instructionId, ApplicationDBContextBase context, string personnelNumberOfSignedBy)
+        private async Task<bool> SendInstructionToPeopleAsync(List<string> personnelNumbers, int instructionId, ApplicationDBContextBase context, string personnelNumberOfSignedBy)
         {
             try
             {
@@ -732,6 +733,22 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 if (schemaName == null ) { return false; }
                 foreach (string personnelNumber in personnelNumbers)
                 {
+                    var userRole = await _userContext.Users.Where(u => u.current_personnel_number == personnelNumber)
+                        .Select(u => u.user_role).FirstOrDefaultAsync();
+                    var instructionType = await context.Instructions.Where(i => i.instruction_id == instructionId)
+                        .Select(i => i.type_of_instruction).FirstOrDefaultAsync();
+                    if (userRole == 2 && instructionType == 1) // Внеплановый инструктаж и отправлен заместителю начальинка отдела => заменяем подписанта - начальника, а не С.С.Кукушкина.
+                    {
+                        string tableNameTemp = $"[{schemaName}].[{personnelNumber}]";
+                        string sql = $"UPDATE {tableNameTemp} SET was_signed_by_PN = @pnTemp WHERE instruction_id = @instructionId";
+
+                        // Execute the raw SQL query with the parameter
+                        context.Database.ExecuteSqlRaw(sql, new Microsoft.Data.SqlClient.SqlParameter("@pnTemp", personnelNumberOfSignedBy),
+                            new Microsoft.Data.SqlClient.SqlParameter("@instructionId", instructionId));
+                        continue;
+                    }
+
+
                     string tableName = $"[{schemaName}].[{personnelNumber}]";
                     string query = $@"
                 INSERT INTO {tableName} 
@@ -842,6 +859,32 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                     if (departmentId == 5) //Это значит, что начальство
                     {
+                        List<string> PNsofManagementOfDepartment = await _userContext.Users
+                            .Where(u => u.department_id == departmentIdNotNull && u.user_role == 1) //Выбирем обычное руководтсво, не С.С.Кукушкина!
+                            .Select(u => u.current_personnel_number)
+                            .ToListAsync();
+                        if (!PNsofManagementOfDepartment.Any())
+                        {
+                            Console.WriteLine($"Руководство в отделе: {departmentName} не найдены!");
+                            continue;
+                        }
+
+                        FullCustomInstruction fullInstrForAssignmentForManagement = new FullCustomInstruction(result.Instruction, package.FullInstruction._paths);
+
+                        foreach (string personnelNumber in PNsofManagementOfDepartment)
+                        {
+                            var result2 = await AssignNewInstructionToUser(fullInstrForAssignmentForManagement, departmentId, personnelNumber);
+                            if (result2)
+                            {
+                                continue;
+                            }
+                            else
+                            {
+                                Console.WriteLine("something went wrong in Submit unplanned instructions");
+                                return BadRequest("Что-то пошло не так с назначением руководству!");
+                            }
+                        }
+
                         continue; //Просто skip для начальства, там не нужно назначать начальнику ничего!
                     }
 
@@ -932,6 +975,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     is_passed_by_everyone = originalInstruction.is_passed_by_everyone,
                     is_assigned_to_people = originalInstruction.is_assigned_to_people
                 };
+
+                if (departmentId == 5)
+                {
+                    instruction.is_assigned_to_people = true;
+                }
 
 
                 List<FilePath> pathsOfFilePath = paths.Select(path => new FilePath
@@ -1077,7 +1125,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 case "Технический отдел":
                     context = _contextTechnicalDepartment;
                     break;
-                case "Начальство":
+                case "Руководство":
                     context = _contextManagement;
                     break;
                 default:
@@ -1829,7 +1877,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     "Общестроительный отдел" => 1,
                     "Технический отдел" => 2,
-                    "Начальство" => 5,
+                    "Руководство" => 5,
                     _ => -1
                 };
             }
