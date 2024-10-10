@@ -346,6 +346,35 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             .ToList();
         }
 
+
+        [HttpPatch("skip-the-unplanned-instruction")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> SkipTheUnplannedInstruction([FromBody] Instruction instructionToSkip)
+        {
+            try
+            {
+                if (instructionToSkip == null)
+                {
+                    return BadRequest("Invalid instruction data.");
+                }
+                string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+                int departmentId = await GetDepartmentIdFromUserName(userName);
+                var dbContext = GetDbContextForDepartmentId(departmentId);
+
+                instructionToSkip.is_assigned_to_people = true;
+                // Save changes to the database or any other logic
+                dbContext.Instructions.Update(instructionToSkip);
+                await dbContext.SaveChangesAsync();
+
+                return NoContent(); // Return 204 No Content if successful
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            
+        }
+
         [HttpGet("export")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> ExportToExcel()
