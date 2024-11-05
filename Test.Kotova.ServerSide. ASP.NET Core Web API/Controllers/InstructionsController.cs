@@ -1671,8 +1671,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpPost("instructions-data-export")]
-        [Authorize(Roles = "ChiefOfDepartment, Coordinator, Manager, Administrator")]
-        public async Task<IActionResult> InstructionsDataExport([FromBody] InstructionExportRequest instructionExportRequest)
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> InstructionsDataExportForChief([FromBody] InstructionExportRequest instructionExportRequest)
         {
 
             var startDate = instructionExportRequest.StartDate;
@@ -1834,6 +1834,67 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             return Ok(listOfInstructions);
         }
+
+        [HttpPost("instructions-data-export-for-management")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> InstructionsDataExportForManager([FromBody] InstructionExportRequest instructionExportRequest)
+        {
+            var startDate = instructionExportRequest.StartDate;
+            var endDate = instructionExportRequest.EndDate.AddDays(1);
+
+            if (instructionExportRequest == null)
+            {
+                return BadRequest("instructionsDataExport - пуст, ошибка!");
+            }
+
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+            var userName = User.FindFirst(ClaimTypes.Name)?.Value;
+
+            var PNofUser = await _userContext.Users
+                .Where(u => u.username == userName)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
+
+            List<Byte> typesOfInstruction = instructionExportRequest.InstructionTypes;
+            string typesOfInstructionString = string.Join(",", typesOfInstruction);
+
+            var department_idString = User.FindFirst("department_id")?.Value;
+            if (department_idString == null || userRole == null)
+            {
+                return BadRequest("Ваш отдел или роль не найдена!");
+            }
+            int department_id = Int32.Parse(department_idString);
+
+            ApplicationDBContextBase departmentDbContext = GetDbContextForDepartmentId(department_id);
+
+            if (departmentDbContext == null)
+            {
+                return BadRequest("Не найден dbContext для данного user-а");
+            }
+            List<InstructionExportInstance> listOfInstructions = new List<InstructionExportInstance>();
+            string schema = GetSchemaName(department_id);
+            if (schema == null)
+            {
+                return BadRequest("Не найдена schema для данного user-а");
+            }
+            if (userRole == "User") // Если пользователь  - User, то выкидываем его :)
+            {
+                return Unauthorized("Как ты сюда попал, User? :)");
+            }
+            else if (userRole == "ChiefOfDepartment")
+            {
+                return Unauthorized("Начальник отдела не должен был здесь оказаться");
+            }
+
+            else if (userRole == "Management")
+            {
+                return Ok();
+            }
+            return BadRequest("Что-то пошло не так. (Для администратора код ещё не сделан!)");
+
+        }
+
 
         public class UserTemp
         {
