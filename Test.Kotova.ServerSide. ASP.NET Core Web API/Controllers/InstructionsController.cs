@@ -106,7 +106,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _contextManagement = contextManagement;
         }
 
-
+        /// <summary>
+        /// Tests the connection to the server.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint is used to verify that the client can successfully communicate with the server.
+        /// Requires the user to be authenticated.
+        /// </remarks>
+        /// <returns>
+        /// Returns a greeting message if the connection is successful.
+        /// </returns>
+        /// <response code="200">Connection successful. Returns the greeting message.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
         [Authorize]
         [HttpGet("greeting")] //ИСПРАВЛЕНО
         public async Task<IActionResult> GetGreeting()
@@ -114,6 +125,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok("Привет, мир!");
         }
 
+
+        /// <summary>
+        /// Retrieves the department ID by a specified username.
+        /// </summary>
+        /// <param name="userName">The username of the user whose department ID is being retrieved.</param>
+        /// <returns>
+        /// Returns the department ID if found, or a BadRequest response if the department ID cannot be found.
+        /// </returns>
+        /// <response code="200">The department ID was retrieved successfully.</response>
+        /// <response code="400">The department ID could not be found for the given username.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         [HttpGet("get-department-id-by/{userName}")]  //ИСПРАВЛЕНО
         public async Task<IActionResult> GetDepartmentIdByUserNameURL(string userName)
@@ -124,14 +147,35 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                    .FirstOrDefaultAsync();
             if (departmentId == null)
             {
-                return BadRequest("Номер отдела не найден по имю пользователя!");
+                return BadRequest("Номер отдела не найден по имени пользователя!");
             }
             return Ok(departmentId);
         }
 
+
+        /// <summary>
+        /// Retrieves instructions for the authenticated user.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint fetches the user's associated instructions by determining their personnel number 
+        /// and department ID from the database. The data is serialized, encrypted, and returned as a string.
+        /// Requires the user to be authenticated.
+        /// </remarks>
+        /// <returns>
+        /// Returns an encrypted string containing the user's instructions.
+        /// </returns>
+        /// <response code="200">
+        /// The user's instructions were retrieved, serialized, and encrypted successfully.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following:
+        /// - The personnel number for the user was not found.
+        /// - The department ID for the user was not found.
+        /// </response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
         [Authorize]
         [HttpGet("get_instructions_for_user")]  //ИСПРАВЛЕНО, ВРОДЕ РАБОТАЕТ?
-        public async Task<IActionResult> GetNotifications()
+        public async Task<IActionResult> GetInstructionsForUser()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? tableNameForUser = await _userContext.Users
@@ -214,7 +258,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             };
         }
 
-
+        /// <summary>
+        /// Marks an instruction as passed by the authenticated user and updates the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint processes a dictionary of instruction details sent in the request body, determines the user's 
+        /// personnel number and department ID, and updates the database to mark the instruction as passed.
+        /// Requires the user to be authenticated.
+        /// </remarks>
+        /// <param name="jsonDictionary">
+        /// A dictionary containing details about the instruction to be processed.
+        /// </param>
+        /// <returns>
+        /// Returns an OK status with a success message if the instruction is updated successfully in the database. 
+        /// Returns a BadRequest response if the dictionary is invalid or if the user's personnel number is not found. 
+        /// Returns NotFound if the instruction is not found in the database.
+        /// </returns>
+        /// <response code="200">The instruction was successfully marked as passed and added to the database.</response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The input dictionary is empty or null.
+        /// - The user's personnel number could not be found.
+        /// </response>
+        /// <response code="404">The instruction was not found in the database.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
         [Authorize]
         [HttpPost("instruction_is_passed_by_user")] //ПРОВЕРЕНО, ТОЧНО РАБОТАЕТ НА ВВОДНЫХ ИНСТРУКТАЖАХ!
         public async Task<IActionResult> SendInstructionIsPassedToDB([FromBody] Dictionary<string, object> jsonDictionary)
@@ -346,7 +413,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             .ToList();
         }
 
-
+        /// <summary>
+        /// Marks an unplanned instruction (внеплановый инструктаж) as skipped.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users, such as Chiefs of Departments or Administrators, 
+        /// to mark an unplanned instruction as skipped. The instruction is updated in the database to reflect 
+        /// that it has been assigned to people.
+        /// Requires the user to have a role of "ChiefOfDepartment" or "Administrator".
+        /// </remarks>
+        /// <param name="instructionToSkip">
+        /// The unplanned instruction object to be marked as skipped.
+        /// </param>
+        /// <returns>
+        /// Returns a 204 No Content status if the operation is successful. Returns a 400 Bad Request 
+        /// if the instruction data is invalid or an error occurs.
+        /// </returns>
+        /// <response code="204">The unplanned instruction was successfully marked as skipped.</response>
+        /// <response code="400">Invalid instruction data or an error occurred while processing the request.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
         [HttpPatch("skip-the-unplanned-instruction")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SkipTheUnplannedInstruction([FromBody] Instruction instructionToSkip)
@@ -375,6 +461,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             
         }
 
+
+        /// <summary>
+        /// Exports department employee data to an Excel file.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments and Administrators) 
+        /// to export the employee data of their respective department to an Excel file.
+        /// The Excel file is dynamically generated using the ClosedXML library and includes headers and data rows.
+        /// Requires the user to be authenticated and have the appropriate role.
+        /// </remarks>
+        /// <returns>
+        /// Returns an Excel file containing employee data for the authenticated user's department.
+        /// </returns>
+        /// <response code="200">
+        /// The Excel file was successfully generated and returned.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The department ID for the user was not found.
+        /// - An error occurred during the data export process.
+        /// </response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
         [HttpGet("export")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> ExportToExcel()
@@ -428,7 +537,35 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-
+        /// <summary>
+        /// Uploads an Excel file to the server.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to upload Excel files.
+        /// The uploaded file is validated for size, type, and content before being stored on the server. 
+        /// **Note:** This endpoint is currently not in use and should not be relied upon for production workflows.
+        /// </remarks>
+        /// <param name="file">
+        /// The Excel file to be uploaded. The file must be in `.xls` or `.xlsx` format and meet size restrictions.
+        /// </param>
+        /// <returns>
+        /// Returns a 200 OK status with the uploaded file's name if the operation is successful.
+        /// Returns a 400 Bad Request status if the file is invalid or fails validation checks.
+        /// Returns a 500 Internal Server Error if there is an issue storing the file.
+        /// </returns>
+        /// <response code="200">
+        /// The file was successfully uploaded and stored on the server.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - No file was uploaded.
+        /// - The file exceeds the maximum allowed size.
+        /// - The file type is not supported.
+        /// - The file is empty or invalid.
+        /// </response>
+        /// <response code="500">Internal server error while processing the file upload.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
         [HttpPost("upload")] //ПОКА НЕ АКТУАЛЬНО!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> UploadExcelFile(IFormFile file)
@@ -508,7 +645,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("sync-names-with-db")] //ИСПРАВЛЕНО, ВРОДЕ ВСЁ РАБОТАЕТ!
+
+        /// <summary>
+        /// Synchronizes names and birth dates of employees with the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves the names and birth dates of employees in the authenticated user's department, 
+        /// excluding the department chief and the user making the request. The data is encrypted before being returned.
+        /// Requires the user to be authenticated and have the role of "ChiefOfDepartment" or "Administrator".
+        /// </remarks>
+        /// <param name="configuration">
+        /// Injected configuration service used for any environment-specific settings (if required).
+        /// </param>
+        /// <returns>
+        /// Returns an encrypted list of tuples containing employee names and birth dates.
+        /// </returns>
+        /// <response code="200">
+        /// The list of employee names and birth dates was successfully retrieved and encrypted.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The department database context could not be determined.
+        /// - An error occurred while processing the request.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user's claim for username was not found or they are not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        [HttpGet("sync-names-with-db")] 
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SyncNamesWithDB([FromServices] IConfiguration configuration)
         {
@@ -547,8 +713,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-
-        [HttpGet("sync-names-non-chief-with-db")] //ИСПРАВЛЕНО, ВРОДЕ ВСЁ РАБОТАЕТ!
+        /// <summary>
+        /// Synchronizes names and birth dates of non-chief employees with the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves the names and birth dates of non-chief employees in the authenticated user's department. 
+        /// It excludes both department chiefs and deputy chiefs, as well as the user making the request. 
+        /// The data is encrypted before being returned.
+        /// Requires the user to be authenticated and have the role of "ChiefOfDepartment" or "Administrator".
+        /// </remarks>
+        /// <param name="configuration">
+        /// Injected configuration service used for any environment-specific settings (if required).
+        /// </param>
+        /// <returns>
+        /// Returns an encrypted list of tuples containing employee names and birth dates for non-chief employees.
+        /// </returns>
+        /// <response code="200">
+        /// The list of non-chief employee names and birth dates was successfully retrieved and encrypted.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The department database context could not be determined.
+        /// - An error occurred while processing the request.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user's claim for username was not found or they are not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        [HttpGet("sync-names-non-chief-with-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SyncNamesOnlyForNonChiefUsersWithDB([FromServices] IConfiguration configuration)
         {
@@ -598,6 +792,32 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             };
         }
 
+
+        /// <summary>
+        /// Synchronizes unassigned instructions with the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves all unassigned (to simple users in department) instructions of type 1 (внеплановый) for the authenticated user's department.
+        /// The data is serialized into JSON format, encrypted, and returned.
+        /// Requires the user to be authenticated and have the role of "ChiefOfDepartment" or "Administrator".
+        /// </remarks>
+        /// <returns>
+        /// Returns an encrypted JSON string containing a list of unassigned instructions of type 1 for the department.
+        /// </returns>
+        /// <response code="200">
+        /// The list of unassigned instructions was successfully retrieved, serialized, and encrypted.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The department database context could not be determined.
+        /// - An error occurred while processing the request.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user's claim for username was not found or they are not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpGet("sync-instructions-with-db")] //РАБОТАЕТ, ВРОДЕ, ВСЁ ОК!
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SyncInstructionsWithDB()
@@ -630,6 +850,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+
+        /// <summary>
+        /// Sends an instruction to a list of personnel based on names and birthdates.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to send a specific instruction 
+        /// to personnel identified by their names and birthdates. The function validates and processes the instruction 
+        /// and updates the corresponding database records.
+        /// </remarks>
+        /// <param name="package">
+        /// The package containing the instruction details and a list of names and birthdates.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response if the instruction is successfully sent and processed. 
+        /// Returns a BadRequest response if there is an error in the package or during processing.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction was successfully sent to the specified personnel.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The package is null or invalid.
+        /// - An error occurred during instruction processing.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated or their username claim is missing.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpPost("send-instruction-to-names")] //ПРОВЕРЕНО, РАБОТАЕТ
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SendInstructionToNames([FromBody] InstructionPackage package)
@@ -836,7 +1086,41 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-
+        /// <summary>
+        /// Submits unplanned(внеплановый) instructions to specified departments.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Management or Administrators) to submit unplanned instructions 
+        /// to one or more specified departments. The instructions are assigned to the department chiefs or management personnel as needed.
+        /// </remarks>
+        /// <param name="package">
+        /// The package containing the unplanned instruction details and a list of department names.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response if the instructions are successfully submitted to all specified departments. 
+        /// Returns a BadRequest response if there is an issue with the input data or during the assignment process.
+        /// </returns>
+        /// <response code="200">
+        /// The unplanned instructions were successfully submitted to the specified departments.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The input package is null.
+        /// - The list of departments is empty or invalid.
+        /// - An error occurred during the instruction assignment process.
+        /// </response>
+        /// <response code="404">
+        /// A specified department was not found.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error during the processing of unplanned instructions.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpPost("send-unplanned-instruction-to-chiefs")]
         [Authorize(Roles = "Management, Administrator")]
         public async Task<IActionResult> SubmitUnplannedInstruction([FromBody] UnplannedInstructionPackage package) 
@@ -941,7 +1225,41 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpPost("add-new-instruction-into-db")] //ПРОВЕРЕНО.
+
+        /// <summary>
+        /// Adds a new instruction into the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to add a new instruction into the database.
+        /// The instruction details include the cause, date range, and associated file paths. If the department ID is 5(Руководство), the instruction is 
+        /// automatically marked as assigned to personnel. **Note:** It shouldn't work for Department with id 5 probably, because there is no ChiefOfDepartment there.
+        /// So forget about marking to assign to personnel automatically.
+        /// </remarks>
+        /// <param name="fullInstruction">
+        /// The full custom instruction object, which includes the instruction details and a list of associated file paths.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response with the created instruction if the operation is successful.
+        /// Returns a BadRequest response if there is an error during processing or if the cause of the instruction already exists.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction was successfully added to the database.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The cause of the instruction already exists in the database.
+        /// - An error occurred while saving the instruction or file paths.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user's username claim was not found or they are not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error during the processing of the request.
+        /// </response>
+        [HttpPost("add-new-instruction-into-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] FullCustomInstruction fullInstruction)
         {
@@ -992,7 +1310,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     is_assigned_to_people = originalInstruction.is_assigned_to_people
                 };
 
-                if (departmentId == 5)
+                if (departmentId == 5) //Почему это здесь? Да, начальство, да но почему мы оставляем что как-будто всем людям назначен инструктаж, если это Руководство. И кто начальник руководства? То есть это лишнее?
                 {
                     instruction.is_assigned_to_people = true;
                 }
@@ -1048,7 +1366,31 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return user.department_id;
         }
 
-        [HttpGet("download-list-of-all-departments-and-employees")] //ПРОВЕРЕНО
+
+        /// <summary>
+        /// Retrieves a list of all departments and their employees from the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Management or Administrators) to download a comprehensive list 
+        /// of all departments and their associated employees. The data is serialized into JSON format and returned in the response.
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with the serialized list of departments and employees if the operation is successful.
+        /// Returns a 500 Internal Server Error response if the operation fails.
+        /// </returns>
+        /// <response code="200">
+        /// The list of all departments and their employees was successfully retrieved and serialized.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error while attempting to retrieve departments and employees from the database.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        [HttpGet("download-list-of-all-departments-and-employees")]
         [Authorize(Roles = "Management, Administrator")]
         public async Task<IActionResult> DownloadListOfDepartmentsAndEmployeesFromDB()
         {
@@ -1086,6 +1428,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+
+        /// <summary>
+        /// Retrieves a list of all department names from the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators, Management, or Administrators) to download a list 
+        /// of department names from the database. The data is returned as a JSON array of strings.
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with the list of department names if the operation is successful. 
+        /// Returns a 500 Internal Server Error response if the operation fails.
+        /// </returns>
+        /// <response code="200">
+        /// The list of department names was successfully retrieved and returned.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error while attempting to retrieve department names from the database.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpGet("download-list-of-departments")] //ИСПРАВЛЕНО
         [Authorize(Roles = "Coordinator, Management, Administrator")]
         public async Task<IActionResult> DownloadListOfDepartmentsFromDB()
@@ -1104,7 +1470,32 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpGet("get-roles-for-newcomer")] //ИСПРАВЛЕНО
+
+
+        /// <summary>
+        /// Retrieves a list of available roles for newcomers from the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to retrieve a list of role types 
+        /// available for assignment to newcomers. The data is returned as a JSON array of strings.
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with the list of role types if the operation is successful. 
+        /// Returns a 500 Internal Server Error response if the operation fails.
+        /// </returns>
+        /// <response code="200">
+        /// The list of role types was successfully retrieved and returned.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error while attempting to retrieve role types from the database.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        [HttpGet("get-roles-for-newcomer")]
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> DownloadListOfRolesFromDB()
         {
@@ -1122,7 +1513,40 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        [HttpPost("insert-new-employee")] //ИСПРАВЛЕНО!
+
+
+        /// <summary>
+        /// Inserts a new employee into the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to insert a new employee 
+        /// into the appropriate department's database. The employee data is validated, and a unique table 
+        /// is created for the employee based on their personnel number.
+        /// </remarks>
+        /// <param name="newcomer">
+        /// The employee object containing details such as name, personnel number, and department.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response if the employee is successfully added to the database. 
+        /// Returns a BadRequest response if the input data is invalid, if the employee already exists, 
+        /// or if the associated table cannot be created.
+        /// </returns>
+        /// <response code="200">
+        /// The employee was successfully added to the database.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - Invalid input data.
+        /// - The employee already exists in the database or department.
+        /// - The associated table could not be created.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        [HttpPost("insert-new-employee")]
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> InsertNewcomerIntoDb([FromBody] Employee newcomer)
         {
@@ -1206,6 +1630,41 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return exists == 1;
         }
 
+
+        /// <summary>
+        /// Generates a new login and password for a newcomer and inserts them into the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to generate a unique login and password 
+        /// for a new user based on the provided information. The generated credentials are inserted into the database, and 
+        /// optionally, an initial instruction can be created for the user.
+        /// </remarks>
+        /// <param name="someInfoAboutNewUser">
+        /// A list of strings containing information about the new user:
+        /// 1. Personnel number.
+        /// 2. Full name.
+        /// 3. Department name.
+        /// 4. User role.
+        /// 5. A flag (True/False) indicating whether an initial instruction should be created.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response with the serialized login and password if the operation is successful. 
+        /// Returns a BadRequest response if there is an error in the input data or during the insertion process.
+        /// </returns>
+        /// <response code="200">
+        /// The login and password were successfully generated and inserted into the database.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - Invalid user role.
+        /// - An error occurred during the insertion process.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpPost("get-login-and-password-for-newcommer")] //ПРОВЕРЕНО!
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GenerateNewPasswordAndLogin([FromBody] List<string> someInfoAboutNewUser)
@@ -1431,7 +1890,30 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
 
-
+        /// <summary>
+        /// Retrieves a list of people requiring initial instructions.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to retrieve a list of people 
+        /// who need to complete their initial instructions. The list is fetched from the database and returned in the response. 
+        /// **Note:** Not in use! like it is working, but there is no need for that (prbly?)
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with the list of names if the operation is successful. 
+        /// Returns a 500 Internal Server Error response if the operation fails.
+        /// </returns>
+        /// <response code="200">
+        /// The list of people requiring initial instructions was successfully retrieved.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error while attempting to retrieve the list of people.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [HttpGet("get-list-of-people-init-instructions")] //Сделано, но толку от простого отображения? Нужно чтобы можно было запросить с сервера 
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> GetNamesForInitialInstructions()
@@ -1520,6 +2002,34 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return dbContexts;
         }
 
+
+        /// <summary>
+        /// Retrieves a list of not-passed instructions for the current user's department.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves a list of instructions that have not been passed by all personnel for the department 
+        /// associated with the current user. **Note:** For Administrator it doesn't seem to work, cause its not full code but,
+        /// if the user is an Administrator, the endpoint fetches data for all departments. (NOT WORKING FOR ADMIN AND NOT CHECKED FOR ADMIN) 
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with the list of instructions and personnel status if the operation is successful. 
+        /// Returns appropriate error responses if the user does not have an associated department or if an error occurs during processing.
+        /// </returns>
+        /// <response code="200">
+        /// The list of not-passed instructions was successfully retrieved.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred during data retrieval.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="404">
+        /// Not Found - No department was found for the user.
+        /// </response>
         [HttpGet("get-not-passed-instructions-for-chief")] //ПРОВЕРЕНО, для Начальника вроде всё работает. Только для администратора не будет находить. Исправь это, если захочешь
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> GetNotPassedInstructionForChief()
@@ -1531,6 +2041,19 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
 
             int departmentId = await GetDepartmentIdFromUserName(username);
+            if (departmentId == null)
+            {
+                // Allow administrators to fetch data for all departments
+                if (User.IsInRole("Administrator"))
+                {
+                    return await GetInstructionsForAllDepartments();
+                }
+                else
+                {
+                    return NotFound("Отдел для данного начальника не найден!");
+                }
+            }
+
 
             var dbContext = GetDbContextForDepartmentId(departmentId);
             if (dbContext == null)
@@ -1670,6 +2193,65 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        private async Task<IActionResult> GetInstructionsForAllDepartments() //MOST LIKELY DOESN'T WORK (FOR ADMIN CODE), JUST COPYPASTED FROM CHATGPT CODE. TODO: COntinue this
+        {
+            try
+            {
+                var allDepartments = await _userContext.Departments.ToListAsync();
+                var instructionsForAllDepartments = new List<InstructionForChief>();
+
+                foreach (var department in allDepartments)
+                {
+                    var dbContext = GetDbContextForDepartmentId(department.department_id);
+                    if (dbContext != null)
+                    {
+                        var instructions = await CheckPassingTheInstructionsBeforeReturningTheData(dbContext, department.department_id);
+                        instructionsForAllDepartments.AddRange(JsonConvert.DeserializeObject<List<InstructionForChief>>(instructions.ToString()));
+                    }
+                }
+
+                return Ok(JsonConvert.SerializeObject(instructionsForAllDepartments));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Ошибка при обработке данных для всех отделов: {ex.Message}");
+            }
+        }
+
+
+
+        /// <summary>
+        /// Exports data about instructions for a department within a specified date range.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to export information 
+        /// about instructions that have been passed by employees in the department. The export can be filtered by 
+        /// a date range and specific types of instructions.
+        /// </remarks>
+        /// <param name="instructionExportRequest">
+        /// An object containing the start date, end date, and a list of instruction types to filter the export.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response with the list of instruction data if the operation is successful. 
+        /// Returns appropriate error responses if the user lacks permissions, or if any required data is missing or invalid.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction data was successfully retrieved and exported.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The export request object is null or invalid.
+        /// - The department or role could not be identified for the user.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred during the data export process.
+        /// </response>
         [HttpPost("instructions-data-export")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> InstructionsDataExportForChief([FromBody] InstructionExportRequest instructionExportRequest)
@@ -1835,6 +2417,39 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return Ok(listOfInstructions);
         }
 
+
+        /// <summary>
+        /// Exports instruction data for management within a specified date range.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Management or Administrators) to export information 
+        /// about instructions that have been passed by employees in the department. The export can be filtered by 
+        /// a date range and specific types of instructions. **Note:** DOESN'T WORK FOR NOW, NOT IN USE! (AS FAR AS I REMEMBER)
+        /// </remarks>
+        /// <param name="instructionExportRequest">
+        /// An object containing the start date, end date, and a list of instruction types to filter the export.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response if the operation is successful. 
+        /// Returns appropriate error responses if the user lacks permissions, or if any required data is missing or invalid.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction data was successfully retrieved and exported for management.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The export request object is null or invalid.
+        /// - The department or role could not be identified for the user.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred during the data export process.
+        /// </response>
         [HttpPost("instructions-data-export-for-management")]
         [Authorize(Roles = "Management, Administrator")]
         public async Task<IActionResult> InstructionsDataExportForManager([FromBody] InstructionExportRequest instructionExportRequest)

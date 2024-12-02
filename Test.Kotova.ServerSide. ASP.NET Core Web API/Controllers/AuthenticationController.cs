@@ -232,6 +232,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+
+        /// <summary>
+        /// Retrieves secure data for authorized users.
+        /// </summary>
+        /// <remarks>
+        /// Test function For Authorization.
+        /// This endpoint provides access to secure information for all authenticated users. 
+        /// It is protected and accessible only after successful authentication.
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with a secure message for authorized users.
+        /// </returns>
+        /// <response code="200">
+        /// The secure data was successfully retrieved for an authorized user.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
         [Authorize]
         [HttpGet("securedata")] //ПРОВЕРЕНО
         public IActionResult GetSecureData()

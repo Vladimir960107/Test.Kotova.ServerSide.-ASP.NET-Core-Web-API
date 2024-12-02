@@ -75,6 +75,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             return Ok(newTask);
         }*/
+
+
+
+        /// <summary>
+        /// Creates a custom task (Test Function).
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows an Administrator to create a custom task and save it to the database. 
+        /// **Note:** This is a test function and is not currently in use in the production environment.
+        /// </remarks>
+        /// <param name="someInfoAboutNewUser">
+        /// An object containing information about the custom task, including the description, 
+        /// department ID, assigned user, due date, and status.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response with the created task object if the operation is successful. 
+        /// Returns a BadRequest response if there is an error during processing.
+        /// </returns>
+        /// <response code="200">
+        /// The custom task was successfully created.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to an error during task creation.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [Authorize(Roles = "Administrator")]
         [HttpPost("create-custom-task")]
         public async Task<IActionResult> CreateCustomTask([FromBody] CustomTask someInfoAboutNewUser)
@@ -104,6 +134,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             
         }
+
+
+
+        /// <summary>
+        /// Retrieves all current tasks for a Chief of Department (Test Function).
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows a Chief of Department to retrieve all tasks assigned to their department. 
+        /// Tasks are filtered by department ID and user role (Chief of Department). 
+        /// **Note:** This is a test function and is not currently in use in the production environment.
+        /// </remarks>
+        /// <returns>
+        /// Returns an OK response with a list of tasks if the operation is successful. 
+        /// Returns a BadRequest response if there is an error during processing.
+        /// </returns>
+        /// <response code="200">
+        /// The tasks were successfully retrieved.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to an error during task retrieval.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
         [Authorize(Roles = "ChiefOfDepartment")]
         [HttpGet("get-all-current-tasks-for-chief")]
         public async Task<IActionResult> GetAllCurrentTasksForChief()
