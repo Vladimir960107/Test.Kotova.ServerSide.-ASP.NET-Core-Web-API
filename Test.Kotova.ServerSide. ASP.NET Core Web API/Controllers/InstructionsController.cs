@@ -118,7 +118,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// </returns>
         /// <response code="200">Connection successful. Returns the greeting message.</response>
         /// <response code="401">Unauthorized - The user is not authenticated.</response>
-        [Authorize]
+        [AllowAnonymous]
         [HttpGet("greeting")] //хяопюбкемн
         public async Task<IActionResult> GetGreeting()
         {
