@@ -154,10 +154,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
 
         /// <summary>
-        /// Retrieves instructions for the authenticated user.
+        /// Retrieves not passed instructions for the authenticated user.
         /// </summary>
         /// <remarks>
-        /// This endpoint fetches the user's associated instructions by determining their personnel number 
+        /// This endpoint fetches the user's associated not passed instructions by determining their personnel number 
         /// and department ID from the database. The data is serialized, encrypted, and returned as a string.
         /// Requires the user to be authenticated.
         /// </remarks>
@@ -174,8 +174,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// </response>
         /// <response code="401">Unauthorized - The user is not authenticated.</response>
         [Authorize]
-        [HttpGet("get_instructions_for_user")]  //ИСПРАВЛЕНО, ВРОДЕ РАБОТАЕТ?
-        public async Task<IActionResult> GetInstructionsForUser()
+        [HttpGet("get_not_passed_instructions_for_user")]  //ИСПРАВЛЕНО, ВРОДЕ РАБОТАЕТ?
+        public async Task<IActionResult> GetUnPassedInstructionsForUser()
         {
             string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
             string? tableNameForUser = await _userContext.Users
@@ -189,13 +189,125 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                    .FirstOrDefaultAsync();
             if (departmentId == null) { return BadRequest($"Номер отдела не найден!"); }
             int departmentIdNotNull = (int)departmentId;
-            object whatever = await ReadDataFromDynamicTable(tableNameForUser, departmentIdNotNull);
+            object whatever = await ReadInstrFromDynamicTable(tableNameForUser, departmentIdNotNull, false);
             string serialized = JsonConvert.SerializeObject(whatever);
             string encryptedData = Encryption_Kotova.EncryptString(serialized);
             return Ok(encryptedData);
         }
 
-        private async Task<object> ReadDataFromDynamicTable(string tableName, int departmentId)
+        /// <summary>
+        /// Retrieves passed instructions for the authenticated user.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint fetches the user's associated passed instructions by determining their personnel number 
+        /// and department ID from the database. The data is serialized, encrypted, and returned as a string.
+        /// Requires the user to be authenticated.
+        /// </remarks>
+        /// <returns>
+        /// Returns an encrypted string containing the user's instructions.
+        /// </returns>
+        /// <response code="200">
+        /// The user's instructions were retrieved, serialized, and encrypted successfully.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following:
+        /// - The personnel number for the user was not found.
+        /// - The department ID for the user was not found.
+        /// </response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        [Authorize]
+        [HttpGet("get_passed_instructions_for_user")]  //ИСПРАВЛЕНО, ВРОДЕ РАБОТАЕТ?
+        public async Task<IActionResult> GetPassedInstructionsForUser()
+        {
+            string? userName = User.FindFirst(ClaimTypes.Name)?.Value;
+            string? tableNameForUser = await _userContext.Users
+                .Where(u => u.username == userName)
+                .Select(u => u.current_personnel_number)
+                .FirstOrDefaultAsync();
+            if (tableNameForUser == null) { return BadRequest($"Не найден персоналный номер для данного пользователя. Подождите пока появится персональный номер"); }
+            int? departmentId = await _userContext.Users
+                   .Where(u => u.username == userName)
+                   .Select(u => u.department_id)
+                   .FirstOrDefaultAsync();
+            if (departmentId == null) { return BadRequest($"Номер отдела не найден!"); }
+            int departmentIdNotNull = (int)departmentId;
+            object whatever = await ReadInstrFromDynamicTable(tableNameForUser, departmentIdNotNull, true);
+            string serialized = JsonConvert.SerializeObject(whatever);
+            string encryptedData = Encryption_Kotova.EncryptString(serialized);
+            return Ok(encryptedData);
+        }
+
+
+        /// <summary>
+        /// Retrieves passed instructions for the anonymous user or by their database User ID.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint fetches the user's associated passed instructions by determining their personnel number 
+        /// and department ID from the database. If the user has a role of 1, it also returns data according to their department.
+        /// The data is serialized, encrypted, and returned as a string.
+        /// </remarks>
+        /// <param name="userId">The database User ID to fetch instructions for a specific user.</param>
+        /// <returns>
+        /// Returns an encrypted string containing the user's instructions or role-specific data.
+        /// </returns>
+        /// <response code="200">
+        /// The user's instructions were retrieved, serialized, and encrypted successfully.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following:
+        /// - The personnel number for the user was not found.
+        /// - The department ID for the user was not found.
+        /// - The user ID was not valid.
+        /// </response>
+        [AllowAnonymous]
+        [HttpGet("get-passed-instructions-for-user-anonymously/{userId}")]
+        public async Task<IActionResult> GetPassedInstructionsForUserAnonymous(int userId)
+        {
+            // Fetch the user from the database by User ID
+            var user = await _userContext.Users.FirstOrDefaultAsync(u => u.id == userId);
+
+            if (user == null)
+            {
+                return BadRequest("The specified User ID was not found.");
+            }
+
+            // Fetch the user's role and determine behavior
+            if (user.user_role != 1 && user.user_role != 2) // User have NOT "user" or "Chief of department" role. (Manager, Coordinator)
+            {
+                // Fetch data specific to the user's department
+                return BadRequest("The user Role is not valid for returning Instructions.");
+            }
+
+            // Fetch the personnel number for other users
+            string? personnelNumber = user.current_personnel_number;
+
+            if (personnelNumber == null)
+            {
+                return BadRequest("The personnel number for the user was not found.");
+            }
+
+            // Fetch the department ID
+            int? departmentId = user.department_id;
+
+            if (departmentId == null)
+            {
+                return BadRequest("The department ID for the user was not found.");
+            }
+
+            // Fetch instructions dynamically based on the user's data
+            object instructions = await ReadInstrFromDynamicTable(personnelNumber, (int)departmentId, true);
+
+            // Serialize and encrypt the instructions
+            string serializedInstructions = JsonConvert.SerializeObject(instructions);
+            string encryptedData = Encryption_Kotova.EncryptString(serializedInstructions);
+
+            return Ok(encryptedData);
+        }
+
+
+
+
+        private async Task<object> ReadInstrFromDynamicTable(string tableName, int departmentId, bool isChoosingPassedInstructions)
         {
             var context = GetDbContextForDepartmentId(departmentId);
             if (context == null)
@@ -210,10 +322,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             string schemaName = GetSchemaName(departmentId);
 
             // Step 1: Retrieve matching instruction IDs and `when_was_send_to_user` from the dynamic table
-            var dynamicTableQuery = $"SELECT * FROM [{schemaName}].[{tableName}] WHERE is_instruction_passed = 0";
-            var dynamicInstructions = await context.Set<DynamicEmployeeInstruction>()
-                .FromSqlRaw(dynamicTableQuery)
-                .ToListAsync();
+            int passedFlag = isChoosingPassedInstructions ? 1 : 0;
+            string dynamicTableQuery = $"SELECT * FROM [{schemaName}].[{tableName}] WHERE is_instruction_passed = {passedFlag}";
+
+            var dynamicInstructions = await context.Set<DynamicEmployeeInstruction>().FromSqlRaw(dynamicTableQuery).ToListAsync();
 
             var instructionIds = dynamicInstructions.Select(di => di.instruction_id).ToList();
             var whenWasSentMap = dynamicInstructions.ToDictionary(di => di.instruction_id, di => di.when_was_send_to_user);
@@ -247,6 +359,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 Result2 = result2
             };
         }
+
         private string GetSchemaName(int departmentId)
         {
             return departmentId switch
