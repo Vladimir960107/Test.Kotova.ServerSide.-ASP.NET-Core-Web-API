@@ -88,6 +88,8 @@ builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
 builder.Services.AddDbContext<ApplicationDBContextManagement>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
+builder.Services.AddDbContext<TelpDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionTELPDatabase")));
 
 builder.Services.AddSingleton<ChiefsManager>();
 builder.Services.AddSingleton<JwtTokenValidator>();
