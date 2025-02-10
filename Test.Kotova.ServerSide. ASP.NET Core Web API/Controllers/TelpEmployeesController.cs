@@ -58,10 +58,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             List<byte> codeNumbers = await _userContext.Departments
                 .Select(u => u.code_number_TELP_DB)
                 .ToListAsync();
-            codeNumbers.Remove(15); //ВАЖНО! УБИРАЕМ НАЧАЛЬСТВО. TODO: Вернуть начальство когда нужно будет ;)
+            codeNumbers.Remove(15); //ВАЖНО! УБИРАЕМ НАЧАЛЬСТВО. TODO: Вернуть начальство когда нужно будет
 
             HashSet<byte> codeNumbersSet = new HashSet<byte>(codeNumbers);
-            //TODO: CONTINUE!!!!!!!!!!!!!!!!!!!!!!!!! 03.01.25-04.01.25 Создай фильтр только тех personnel number которые в списке codeNumbers ;0
 
             List<string> personnelNumbersAlreadyInUse = await _userContext.Users
                 .Select(u => u.current_personnel_number)
