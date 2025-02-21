@@ -44,6 +44,7 @@ using System.Linq;
 using DocumentFormat.OpenXml.Office2010.Drawing.Charts;
 using Microsoft.AspNetCore.Identity;
 using ClosedXML.Excel;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Constants;
 
 //Movig to schema in databases after that
 
@@ -104,6 +105,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _userContext = userContext;
             _contextTechnicalDepartment = contextTechnicalDepartment;
             _contextManagement = contextManagement;
+        }
+
+
+
+
+        private ApplicationDBContextBase GetDbContextForDepartmentId(int departmentId)
+        {
+            return DepartmentMappings.GetDbContext(
+                departmentId,
+                _contextGeneralConstr,
+                _contextTechnicalDepartment,
+                _contextManagement
+            );
+        }
+
+        private async Task<string> GetSchemaName(int departmentId)
+        {
+            var schema = await _userContext.Departments
+                .Where(d => d.department_id == departmentId)
+                .Select(d => d.department_schema)
+                .FirstOrDefaultAsync();
+
+            return schema ?? "dbo"; // Return "dbo" as default if no schema found
         }
 
         /// <summary>
@@ -315,17 +339,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 throw new ArgumentException("Invalid departmentId");
             }
 
-            if (!Regex.IsMatch(tableName, @"^\d{10}$")) // Ensure the tableName is a valid 10-digit number
+            if (!Regex.IsMatch(tableName, @"^\d{10}$"))
             {
                 throw new ArgumentException("Invalid table name");
             }
-            string schemaName = GetSchemaName(departmentId);
+
+            string schemaName = await GetSchemaName(departmentId);
 
             // Step 1: Retrieve matching instruction IDs and `when_was_send_to_user` from the dynamic table
             int passedFlag = isChoosingPassedInstructions ? 1 : 0;
             string dynamicTableQuery = $"SELECT * FROM [{schemaName}].[{tableName}] WHERE is_instruction_passed = {passedFlag}";
 
-            var dynamicInstructions = await context.Set<DynamicEmployeeInstruction>().FromSqlRaw(dynamicTableQuery).ToListAsync();
+            var dynamicInstructions = await context.Set<DynamicEmployeeInstruction>()
+                .FromSqlRaw(dynamicTableQuery)
+                .ToListAsync();
 
             var instructionIds = dynamicInstructions.Select(di => di.instruction_id).ToList();
             var whenWasSentMap = dynamicInstructions.ToDictionary(di => di.instruction_id, di => di.when_was_send_to_user);
@@ -360,16 +387,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             };
         }
 
-        private string GetSchemaName(int departmentId)
-        {
-            return departmentId switch
-            {
-                1 => "GeneralConstructionDep",
-                2 => "TechnicalDep",
-                5 => "Management",
-                _ => "dbo" // Default schema
-            };
-        }
+        
+
 
         /// <summary>
         /// Marks an instruction as passed by the authenticated user and updates the database.
@@ -431,13 +450,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
         private async Task<bool> PassInstructionIntoDb(Dictionary<string, object> jsonDictionary, string personnelNumberForUser, int departmentId)
         {
-            var context = GetDbContextForDepartmentId(departmentId); // Replace this with your actual method to get the context based on departmentId
+            var context = GetDbContextForDepartmentId(departmentId);
             if (context == null)
             {
                 throw new ArgumentException("Invalid departmentId");
             }
 
-            string schemaName = GetSchemaName(departmentId);
+            string schemaName = await GetSchemaName(departmentId);
 
             string instructionCause = ConvertJsonElement(jsonDictionary[DBProcessor.tableName_sql_INSTRUCTIONS_cause])?.ToString();
 
@@ -894,16 +913,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private ApplicationDBContextBase GetDbContextForDepartmentId(int departmentId)
-        {
-            return departmentId switch
-            {
-                1 => _contextGeneralConstr,
-                2 => _contextTechnicalDepartment,
-                5 => _contextManagement,
-                _ => null
-            };
-        }
+        
 
 
         /// <summary>
@@ -993,11 +1003,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="403">
         /// Forbidden - The user does not have the required role.
         /// </response>
-        [HttpPost("send-instruction-to-names")] //ПРОВЕРЕНО, РАБОТАЕТ
+        [HttpPost("send-instruction-to-names")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
         public async Task<IActionResult> SendInstructionToNames([FromBody] InstructionPackage package)
         {
-            
             return await SendInstructionToNamesInternal(package);
         }
 
@@ -1008,13 +1017,18 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 .Where(u => u.username == username)
                 .Select(u => u.current_personnel_number)
                 .FirstOrDefaultAsync();
+
             int departmentId = await _userContext.Users
-                   .Where(u => u.username == username)
-                   .Select(u => u.department_id)
-                   .FirstOrDefaultAsync();
+                .Where(u => u.username == username)
+                .Select(u => u.department_id)
+                .FirstOrDefaultAsync();
+
             ApplicationDBContextBase dbContext = GetDbContextForDepartmentId(departmentId);
 
-            if (dbContext == null) { return BadRequest("Отдел для данного человека не найден! send-instruction-to-names failed."); }
+            if (dbContext == null)
+            {
+                return BadRequest("Отдел для данного человека не найден! send-instruction-to-names failed.");
+            }
 
             if (package == null)
             {
@@ -1152,8 +1166,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             try
             {
                 var userName = User.FindFirst(ClaimTypes.Name)?.Value;
-                var schemaName = await UserNameToSchemaName(userName);
-                if (schemaName == null ) { return false; }
+                var schemaName = await GetSchemaName(await GetDepartmentIdFromUserName(userName));
+                if (schemaName == null) { return false; }
                 foreach (string personnelNumber in personnelNumbers)
                 {
                     var userRole = await _userContext.Users.Where(u => u.current_personnel_number == personnelNumber)
@@ -1944,7 +1958,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
             if (departmentId == null) return false;
             int departmentIdNotNull = departmentId.Value;
-            string schemaName = GetSchemaName(departmentIdNotNull);
+            string schemaName = await GetSchemaName(departmentIdNotNull);
             if (schemaName == "dbo") return false;
 
             ApplicationDBContextBase dbContext = GetDbContextForDepartmentId(departmentIdNotNull);
@@ -2059,7 +2073,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         .Where(u => u.current_personnel_number == personnelNumber)
                         .Select(u => u.department_id)
                         .FirstOrDefaultAsync();
-                    var schemaName = GetSchemaName(departmentId);
+                    var schemaName = await GetSchemaName(departmentId);
 
                     var dynamicTableQuery = $"SELECT TOP 1 is_instruction_passed FROM [{schemaName}].[{personnelNumber}]";
                     var isInstructionPassed = await dbContext.Set<DynamicEmployeeInstruction>()
@@ -2177,7 +2191,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             return await CheckPassingTheInstructionsBeforeReturningTheData(dbContext, departmentId);
         }
 
-        private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext,int departmentId)
+        private async Task<IActionResult> CheckPassingTheInstructionsBeforeReturningTheData(ApplicationDBContextBase dbContext, int departmentId)
         {
             var instructionsToCheck = await dbContext.Instructions
                 .Where(i => !i.is_passed_by_everyone)
@@ -2188,11 +2202,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return Ok(JsonConvert.SerializeObject(new List<InstructionForChief>()));
             }
 
-            var schemaName = await _userContext.Departments
-                .Where(d => d.department_id == departmentId)
-                .Select(d => d.department_schema)
-                .FirstOrDefaultAsync();
-            if (schemaName == null) { return BadRequest("schema не найдена для данного отдела (CheckPassingTheInstructionsBeforeReturningTheData)"); }
+            var schemaName = await GetSchemaName(departmentId);
+            if (schemaName == null)
+            {
+                return BadRequest("schema не найдена для данного отдела (CheckPassingTheInstructionsBeforeReturningTheData)");
+            }
 
             try
             {
@@ -2409,7 +2423,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Не найден dbContext для данного user-а");
             }
             List<InstructionExportInstance> listOfInstructions = new List<InstructionExportInstance>();
-            string schema = GetSchemaName(department_id);
+            string schema = await GetSchemaName(department_id);
             if (schema == null)
             {
                 return BadRequest("Не найдена schema для данного user-а");
@@ -2601,7 +2615,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return BadRequest("Не найден dbContext для данного user-а");
             }
             List<InstructionExportInstance> listOfInstructions = new List<InstructionExportInstance>();
-            string schema = GetSchemaName(department_id);
+            string schema = await GetSchemaName(department_id);
             if (schema == null)
             {
                 return BadRequest("Не найдена schema для данного user-а");
