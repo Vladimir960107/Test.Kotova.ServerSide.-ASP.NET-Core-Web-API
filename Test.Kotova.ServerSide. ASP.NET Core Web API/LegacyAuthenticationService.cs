@@ -1,153 +1,264 @@
-﻿using DocumentFormat.OpenXml.Bibliography;
-using DocumentFormat.OpenXml.Spreadsheet;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
+using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
+using System.Threading.Tasks;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
-using Kotova.CommonClasses;
-using DocumentFormat.OpenXml.Drawing.Diagrams;
-
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
+using BC = BCrypt.Net.BCrypt;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
 {
+    /// <summary>
+    /// Service for legacy authentication operations
+    /// </summary>
     public class LegacyAuthenticationService
     {
-        //private readonly HttpClient _httpClient;
+        private readonly ILynksDbService _dbService;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<LegacyAuthenticationService> _logger;
+        private readonly ChiefsManager _chiefsManager;
 
-        private readonly ApplicationDbContextUsers _context;
-
-        /*
-        public LegacyAuthenticationService(HttpClient httpClient)
+        public LegacyAuthenticationService(
+            ILynksDbService dbService,
+            IConfiguration configuration,
+            ILogger<LegacyAuthenticationService> logger,
+            ChiefsManager chiefsManager)
         {
-            _httpClient = httpClient;
+            _dbService = dbService;
+            _configuration = configuration;
+            _logger = logger;
+            _chiefsManager = chiefsManager;
         }
-        */
-        public LegacyAuthenticationService(ApplicationDbContextUsers context)
+
+        /// <summary>
+        /// Authenticates a user and generates a JWT token
+        /// </summary>
+        /// <param name="username">The username</param>
+        /// <param name="password">The password</param>
+        /// <returns>Token and user if successful, null otherwise</returns>
+        public async Task<(string Token, User User)> AuthenticateAsync(string username, string password)
         {
-            _context = context;
+            try
+            {
+                var user = await _dbService.GetUserByUsernameAsync(username);
+                if (user == null)
+                {
+                    _logger.LogWarning($"Authentication failed: User {username} not found");
+                    return (null, null);
+                }
+
+                if (!BC.Verify(password, user.password_hash))
+                {
+                    _logger.LogWarning($"Authentication failed: Invalid password for user {username}");
+                    return (null, null);
+                }
+
+                // Generate JWT token
+                var token = GenerateJwtToken(user);
+
+                // If the user is a chief, update their online status
+                if (user.Role?.role_type == "ChiefOfDepartment")
+                {
+                    _chiefsManager.TrySignInChief(user.department_id, user.id.ToString(), null);
+                    await UpdateDepartmentChiefStatus(user.department_id, true);
+                }
+
+                _logger.LogInformation($"User {username} authenticated successfully");
+                return (token, user);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error during authentication for user {username}");
+                return (null, null);
+            }
         }
 
-        public (bool?, User?) PerformLogin(User userTemp, string plainPassword)
+        /// <summary>
+        /// Perform login with a user object and plain password
+        /// </summary>
+        /// <param name="user">The user object</param>
+        /// <param name="plainPassword">The plain text password</param>
+        /// <returns>Authentication result and user object</returns>
+        public (bool IsAuthenticated, User User) PerformLogin(User user, string plainPassword)
         {
+            if (user == null)
+            {
+                _logger.LogWarning("Authentication failed: User is null");
+                return (false, null);
+            }
 
-            bool isPasswordValid = BCrypt.Net.BCrypt.Verify(plainPassword, userTemp.password_hash);
+            bool isPasswordValid = BC.Verify(plainPassword, user.password_hash);
 
             if (!isPasswordValid)
             {
+                _logger.LogWarning($"Authentication failed: Invalid password for user {user.username}");
                 return (false, null);
             }
 
-            if (userTemp.current_email is not null)
-            {
-                /*
-                // Generate 2FA code
-                string twoFactorCode = GenerateTwoFactorCode();
-                // Save the code in the database or cache with a timestamp
-                SaveTwoFactorCode(username, twoFactorCode);
-                // Send the code via email
-                await SendTwoFactorCodeEmail(username, twoFactorCode); //THIS ALL CODE IS FOR 2-FACTOR AUTHENTICATION
-                IF AUTHENTICATED - 
-                return (true, userTemp);
-                IF NOT AUTHENTICATED -
-                return (false, userTemp);
-                */
-                // IN CASE HE IS NOT AUTHENTICATED - CODE AT THE TOP THAT IS COMMENTED SHOULD RETURN FALSE AND STUFF!
-                return (true, userTemp);
-            }
-            if (userTemp.current_email is null) //ДЛЯ ВОДИТЕЛЕЙ И НЕАВТОРИЗИРОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ, МОЖЕТ ПО НОМЕРУ ТЕЛЕФОНА?
-            {
-                //return something
-                //CHECK BY NUMBER OR JUST FORGET ABOUT IT ¯\_(ツ)_/¯
-                return (true,userTemp); //gonna return (true, User)
-            }
-            if (userTemp.current_personnel_number is null) // ДЛЯ  ПОЛЬЗОВАТЕЛЕЙ БЕЗ ПЕРСОНАЛЬНОГО НОМЕРА!
-            {
-                return (null, userTemp); // gonna return (null,User)
-            }
-            return (false, userTemp); // gonna return (false, User)
-        }
-
-        
-        /*
-
-        public async Task SendTwoFactorCodeEmail(string username, string code)
-        {
-            var user = GetUserByUsername(username); // Retrieve user info from the database
-            var emailService = new EmailService(); // This would be ideally injected via DI
-            await emailService.SendEmailAsync(user.Email, "Your 2FA Code", $"Your code is: {code}");
-        }
-        public bool VerifyTwoFactorCode(string username, string inputCode)
-        {
-            var storedCode = GetStoredTwoFactorCode(username); // Get the stored 2FA code
-            return storedCode != null && storedCode.Code == inputCode && storedCode.Expiry > DateTime.UtcNow;
-        }
-
-        */
-
-        public async Task<(bool?, User?)> SimpleAuthenticationUserAsync(string username, string password)
-        {
-            // Fetch the user from the database
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.username == username);
-
-            if (user == null || !VerifyPassword(password, user.password_hash))
-            {
-                return (false, null);
-            }
-            // Check if user exists and password matches
-            if (user.current_personnel_number is null)
-            {
-                return (null, user);
-
-            }
+            _logger.LogInformation($"User {user.username} authenticated successfully");
             return (true, user);
-
         }
 
-
-        private bool VerifyPassword(string providedPassword, string storedHash)
+        /// <summary>
+        /// Simple authentication for users
+        /// </summary>
+        /// <param name="username">The username</param>
+        /// <param name="password">The password</param>
+        /// <returns>Authentication result and user object</returns>
+        public async Task<(bool IsAuthenticated, User User)> SimpleAuthenticationUserAsync(string username, string password)
         {
-            // Implement password verification logic here
-            // This could be a simple comparison or a more complex hash verification
-            return providedPassword == storedHash; // Simplified for illustration
-        }
-        // Вроде как это уже не нужно. Можешь убрать?
-        /*
-        public async Task<ApplicationUser> GetByUserNameAndPassword(string username, string password)
-        {
-            if (await (PerformLogin(username, password)))
+            try
             {
+                var user = await _dbService.GetUserByUsernameAsync(username);
+
+                if (user == null)
+                {
+                    _logger.LogWarning($"Authentication failed: User {username} not found");
+                    return (false, null);
+                }
+
+                if (!BC.Verify(password, user.password_hash))
+                {
+                    _logger.LogWarning($"Authentication failed: Invalid password for user {username}");
+                    return (false, null);
+                }
+
+                _logger.LogInformation($"User {username} authenticated successfully");
+                return (true, user);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error during simple authentication for user {username}");
+                return (false, null);
             }
         }
-        */
-        /*
 
-        public async Task<bool> AuthenticateUserAsyncLegacy(string username, string password)
+        /// <summary>
+        /// Creates a new user account
+        /// </summary>
+        /// <param name="username">The username</param>
+        /// <param name="password">The password</param>
+        /// <param name="roleId">The role ID</param>
+        /// <param name="departmentId">The department ID</param>
+        /// <param name="personnelId">The personnel ID</param>
+        /// <param name="email">The email address (optional)</param>
+        /// <returns>The created user if successful, null otherwise</returns>
+        public async Task<User> CreateUserAsync(string username, string password, int roleId, int departmentId, int personnelId, string email = null)
         {
-            var legacyCredentials = ConvertToLegacyFormat(username, password);
-            var response = await SendAuthenticationRequestToLegacySystem(legacyCredentials);
-            return ParseLegacyResponse(response);
+            try
+            {
+                // Check if user already exists
+                var existingUser = await _dbService.GetUserByUsernameAsync(username);
+                if (existingUser != null)
+                {
+                    _logger.LogWarning($"User creation failed: Username {username} already exists");
+                    return null;
+                }
+
+                // Hash the password
+                var passwordHash = BC.HashPassword(password);
+
+                // Create new user object
+                var user = new User
+                {
+                    username = username,
+                    password_hash = passwordHash,
+                    user_role_id = roleId,
+                    department_id = departmentId,
+                    personnel_id = personnelId,
+                    current_email = email
+                };
+
+                // Save user to database
+                var createdUser = await _dbService.CreateUserAsync(user);
+                _logger.LogInformation($"User {username} created successfully");
+                return createdUser;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error creating user {username}");
+                return null;
+            }
         }
 
-        private string ConvertToLegacyFormat(string username, string password)
+        /// <summary>
+        /// Updates the department chief online status
+        /// </summary>
+        /// <param name="departmentId">The department ID</param>
+        /// <param name="isOnline">The online status</param>
+        /// <returns>True if successful, false otherwise</returns>
+        public async Task<bool> UpdateDepartmentChiefStatus(int departmentId, bool isOnline)
         {
-            // Convert credentials into a legacy format
-            // Here we just concatenate them for simplicity
-            return $"{username}:{password}";
+            try
+            {
+                var department = await _dbService.GetDepartmentByIdAsync(departmentId);
+                if (department == null)
+                {
+                    _logger.LogWarning($"Department {departmentId} not found");
+                    return false;
+                }
+
+                department.is_chief_online = isOnline;
+                department.last_online_set_UTC = DateTime.UtcNow;
+                await _dbService.UpdateDepartmentAsync(department);
+
+                _logger.LogInformation($"Department {departmentId} chief status updated to {(isOnline ? "online" : "offline")}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating department {departmentId} chief status");
+                return false;
+            }
         }
 
-        private async Task<string> SendAuthenticationRequestToLegacySystem(string credentials)
+        /// <summary>
+        /// Generates a JWT token for the user
+        /// </summary>
+        /// <param name="user">The user</param>
+        /// <returns>JWT token</returns>
+        private string GenerateJwtToken(User user)
         {
-                var content = new StringContent(credentials, Encoding.UTF8, "text/plain");
-                var response = await _httpClient.PostAsync("http://legacy-auth-system.example.com/auth", content);
-                return await response.Content.ReadAsStringAsync();
-        }
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.ASCII.GetBytes(_configuration["JwtConfig:Secret"]);
 
-        private bool ParseLegacyResponse(string response)
-        {
-            // Assume the legacy system returns "true" or "false"
-            return response.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
+            var claims = new List<Claim>
+            {
+                new Claim("nameid", user.id.ToString()),
+                new Claim("unique_name", user.username),
+                new Claim("role", user.Role?.role_type ?? "User"),
+                new Claim("DepartmentId", user.department_id.ToString())
+            };
+
+            if (user.Personnel != null)
+            {
+                claims.Add(new Claim("PersonnelId", user.personnel_id.ToString()));
+                claims.Add(new Claim("PersonnelNumber", user.Personnel.personnel_number));
+
+                // Get employee information for full name only
+                var employee = _dbService.GetEmployeeFullNameAsync(user.personnel_id, user.department_id).Result;
+                if (!string.IsNullOrEmpty(employee))
+                {
+                    claims.Add(new Claim("FullName", employee));
+                }
+            }
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddHours(8), // Token valid for 8 hours
+                Issuer = _configuration["JwtConfig:Issuer"],
+                Audience = _configuration["JwtConfig:Audience"],
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
         }
-        */
     }
 }

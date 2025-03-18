@@ -13,17 +13,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Archive\**" />
-    <Compile Remove="Constants\**" />
-    <Content Remove="Archive\**" />
-    <Content Remove="Constants\**" />
-    <EmbeddedResource Remove="Archive\**" />
-    <EmbeddedResource Remove="Constants\**" />
-    <None Remove="Archive\**" />
-    <None Remove="Constants\**" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.29" />
@@ -44,10 +33,6 @@
     <Reference Include="Kotova.CommonClasses">
       <HintPath>..\..\Kotova.CommonClasses\Kotova.CommonClasses\bin\Debug\net6.0\Kotova.CommonClasses.dll</HintPath>
     </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="UploadedFiles\" />
   </ItemGroup>
 
 </Project>

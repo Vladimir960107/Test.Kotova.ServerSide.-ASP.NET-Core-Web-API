@@ -8,7 +8,7 @@ using System.Text;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions; // Added for ServiceExtensions
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Hubs;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using System.Security.Cryptography.X509Certificates;
@@ -37,9 +37,6 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// Configure DbContext and DbService using extension methods
-builder.Services.ConfigureLynksDbContext(builder.Configuration);
-builder.Services.ConfigureLynksDbService();
 
 builder.Services.AddControllers()
         .AddJsonOptions(options =>
@@ -83,8 +80,19 @@ builder.Services.AddSwaggerGen(c =>
     c.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
 });
 
-builder.Services.AddSingleton<ChiefsManager>();
-builder.Services.AddSingleton<JWTTokenValidator>();
+builder.Services.AddDbContext<ApplicationDbContextUsers>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
+builder.Services.AddDbContext<ApplicationDBContextGeneralConstr>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
+builder.Services.AddDbContext<ApplicationDBContextTechnicalDepartment>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
+builder.Services.AddDbContext<ApplicationDBContextManagement>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionMain")));
+builder.Services.AddDbContext<TelpDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnectionTELPDatabase")));
+
+builder.Services.AddSingleton<_ChiefsManager>();
+builder.Services.AddSingleton<_JWTTokenValidator>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -121,6 +129,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+
+
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Coordinator", policy =>
@@ -155,19 +165,13 @@ builder.Services.AddAuthorization(options =>
             return context.User.IsInRole("Administrator");
         });
     });
-    options.AddPolicy("Management", policy =>
-    {
-        policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(context =>
-        {
-            return context.User.IsInRole("Management");
-        });
-    });
 });
 
-builder.Services.AddScoped<LegacyAuthenticationService>();
-builder.Services.AddScoped<NotificationsService>();
+
+builder.Services.AddScoped<_LegacyAuthenticationService>();
+builder.Services.AddScoped<_NotificationsService>();
 builder.Services.AddScoped<MyDataService>();
+
 
 var app = builder.Build();
 
@@ -176,7 +180,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-else
+else 
 {
     // ќграничьте доступ к Swagger UI в производственной среде 
     //!!!!!!!!!!your-secret-key - зашифруй его, добавь в отдельный файл и спр€чь!
@@ -184,7 +188,7 @@ else
     {
         appBuilder.Use(async (context, next) =>
         {
-            if (!context.Request.Headers.ContainsKey("X-Swagger-Auth") || context.Request.Headers["X-Swagger-Auth"] != "your-secret-key")
+            if (!context.Request.Headers.ContainsKey("X-Swagger-Auth") || context.Request.Headers["X-Swagger-Auth"] != "your-secret-key") 
             {
                 context.Response.StatusCode = 401;
                 await context.Response.WriteAsync("Unauthorized");
@@ -199,12 +203,15 @@ else
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API v1"));
 }
 
+
 //app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+
 // Map your SignalR hub here
-app.MapHub<NotificationHub>("/notificationHub");
+app.MapHub<_NotificationHub>("/notificationHub");
+
 
 app.MapControllers();
 app.Run();

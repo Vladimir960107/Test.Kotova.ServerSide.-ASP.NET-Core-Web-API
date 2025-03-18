@@ -1,319 +1,210 @@
-﻿using System;
-using System.Data.SqlClient;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Timers;
-using Microsoft.Extensions.Configuration;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
-
-
-namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
+namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
 {
+    /// <summary>
+    /// Manages chiefs of departments and their online status
+    /// </summary>
     public class ChiefsManager
     {
-        private readonly ConcurrentDictionary<int, Department_inNotification> _signedInChiefs;
+        private readonly ILogger<ChiefsManager> _logger;
+        private readonly ConcurrentDictionary<int, ChiefInfo> _chiefsByDepartment;
+        private Timer _cleanupTimer;
 
-        public ChiefsManager()
+        public ChiefsManager(ILogger<ChiefsManager> logger)
         {
-            _signedInChiefs = new ConcurrentDictionary<int, Department_inNotification>();
+            _logger = logger;
+            _chiefsByDepartment = new ConcurrentDictionary<int, ChiefInfo>();
+
+            // Start the cleanup timer to check for chiefs who might have gone offline
+            _cleanupTimer = new Timer(CleanupChiefStatus, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
         }
 
-        public bool IsChiefOnline(int departmentId)
-        {
-            return _signedInChiefs.ContainsKey(departmentId);
-        }
-
+        /// <summary>
+        /// Attempts to sign in a chief for a department
+        /// </summary>
+        /// <param name="departmentId">The department ID</param>
+        /// <param name="chiefId">The chief's user ID</param>
+        /// <param name="connectionId">The SignalR connection ID</param>
+        /// <returns>True if successful, false if another chief is already signed in</returns>
         public bool TrySignInChief(int departmentId, string chiefId, string connectionId)
-        {
-            return _signedInChiefs.TryAdd(departmentId, new Department_inNotification { ChiefId = chiefId, ConnectionId = connectionId });
-        }
-
-        public bool TrySignOutChief(int departmentId)
-        {
-            return _signedInChiefs.TryRemove(departmentId, out _);
-        }
-    }
-
-    /*public class ChiefsManager // Was working, but not properly!
-    {
-        //private Dictionary<int, ChiefSession> sessions = new Dictionary<int, ChiefSession>(); not needed.
-        private readonly string _connectionString;
-        private ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)> monitorTasks = new ConcurrentDictionary<int, (CancellationTokenSource Cts, Task MonitoringTask)>();
-
-        public ChiefsManager(IConfiguration configuration)
-        {
-            _connectionString = configuration.GetConnectionString("DefaultConnectionForUsers");
-        }
-
-        public async Task PingChiefAsync(int chiefId) // ЗДЕСЬ СОБСТВЕННО СЮДА ПИНГУЕТ С КЛИЕНТСКОГО ПРИЛОЖЕНИЯ КАЖДЫЕ 30 СЕКУНД. 
-        {
-            // Check if there is an existing task and whether it is still running.
-            if (monitorTasks.TryGetValue(chiefId, out var existingTaskInfo))
-            {
-                // Check if the task has completed or has been cancelled.
-                if (existingTaskInfo.MonitoringTask.IsCompleted || existingTaskInfo.MonitoringTask.IsCanceled)
-                {
-                    // If the task is no longer active, remove it from the dictionary.
-                    if (monitorTasks.TryRemove(chiefId, out var removedTaskInfo))
-                    {
-                        Console.WriteLine($"Completed monitoring task for Chief ID {chiefId} removed.");
-                    }
-                }
-                else
-                {
-                    // If the task is still active, simply return and do nothing.
-                    Console.WriteLine($"Monitoring task for Chief ID {chiefId} is still active. No new task started.");
-                    return;
-                }
-            }
-
-            // Proceed to update the session in the database.
-            await UpdateChiefSessionAsync(chiefId);
-
-            // If no active monitoring task exists, start a new one.
-            var newCts = new CancellationTokenSource();
-            var newTask = MonitorChiefStatusInBackground(chiefId, newCts.Token);
-            monitorTasks.TryAdd(chiefId, (newCts, newTask));
-            Console.WriteLine($"New monitoring task started for Chief ID {chiefId}.");
-        }
-
-        private async Task MonitorChiefStatusInBackground(int chiefId, CancellationToken token)
         {
             try
             {
-                while (!token.IsCancellationRequested)
+                // If there's no chief for this department yet, or it's the same chief
+                if (!_chiefsByDepartment.TryGetValue(departmentId, out var existingChief) ||
+                    (existingChief != null && existingChief.ChiefId == chiefId))
                 {
-                    if (!await CheckChiefStatus(chiefId))
+                    var chiefInfo = new ChiefInfo
                     {
-                        break;
-                    }
-                    await Task.Delay(TimeSpan.FromSeconds(60), token);
+                        ChiefId = chiefId,
+                        ConnectionId = connectionId,
+                        LastActivityTime = DateTime.UtcNow
+                    };
+
+                    _chiefsByDepartment[departmentId] = chiefInfo;
+                    _logger.LogInformation($"Chief {chiefId} signed in for department {departmentId}");
+                    return true;
                 }
+
+                _logger.LogWarning($"Chief {chiefId} attempted to sign in for department {departmentId}, but chief {existingChief.ChiefId} is already signed in");
+                return false;
             }
-            catch (TaskCanceledException)
+            catch (Exception ex)
             {
-                Console.WriteLine($"Monitoring stopped for Chief ID {chiefId}");
-            }
-            finally
-            {
-                if (monitorTasks.TryRemove(chiefId, out var _))
-                {
-                    Console.WriteLine($"Clean up task for Chief ID {chiefId} completed."); //ВАЖНО! TODO: Не работает так как задумано.
-                }
+                _logger.LogError(ex, $"Error signing in chief {chiefId} for department {departmentId}");
+                return false;
             }
         }
 
-
-        private async Task UpdateChiefSessionAsync(int chiefId)
+        /// <summary>
+        /// Signs out a chief from a department
+        /// </summary>
+        /// <param name="departmentId">The department ID</param>
+        /// <returns>True if successful, false if no chief was signed in</returns>
+        public bool TrySignOutChief(int departmentId)
         {
-            string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
-               $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue, " +
-               $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @CurrentDateTime " +
-               $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-            using (var connection = new SqlConnection(_connectionString))
+            try
             {
-                await connection.OpenAsync();
-                using (var command = new SqlCommand(query, connection))
+                if (_chiefsByDepartment.TryRemove(departmentId, out var chiefInfo))
                 {
-                    command.Parameters.AddWithValue("@NewValue", true);
-                    command.Parameters.AddWithValue("@CurrentDateTime", DateTime.UtcNow);
-                    command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                    await command.ExecuteNonQueryAsync();
+                    _logger.LogInformation($"Chief {chiefInfo.ChiefId} signed out from department {departmentId}");
+                    return true;
                 }
+
+                _logger.LogWarning($"Attempted to sign out chief from department {departmentId}, but no chief was signed in");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error signing out chief from department {departmentId}");
+                return false;
             }
         }
 
-        internal async Task PingOfflineChiefAsync(int chiefId)
+        /// <summary>
+        /// Gets the chief info for a department
+        /// </summary>
+        /// <param name="departmentId">The department ID</param>
+        /// <returns>Chief info if a chief is signed in, null otherwise</returns>
+        public ChiefInfo GetChiefInfo(int departmentId)
         {
-            await UpdateChiefSessionAsyncToAnotherValue(chiefId);
+            _chiefsByDepartment.TryGetValue(departmentId, out var chiefInfo);
+            return chiefInfo;
         }
 
-        public async Task<bool> CheckChiefStatus(int chiefId)
+        /// <summary>
+        /// Gets all departments with their chief's online status
+        /// </summary>
+        /// <returns>A dictionary of department IDs and online status</returns>
+        public Dictionary<int, bool> GetAllChiefsStatus()
         {
-            var threshold = DateTime.UtcNow.AddSeconds(-60);  // Adjust based on your session timeout needs
+            return _chiefsByDepartment.ToDictionary(x => x.Key, x => true);
+        }
 
-            string query = $"SELECT {DBProcessor.tableName_sql_lastOnlineSetUTC}, {DBProcessor.tableName_sql_isChiefOnline} " +
-                           $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
-                           $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-
-            using (var connection = new SqlConnection(_connectionString))
+        /// <summary>
+        /// Updates a chief's last activity time
+        /// </summary>
+        /// <param name="departmentId">The department ID</param>
+        /// <returns>True if successful, false if no chief is signed in</returns>
+        public bool UpdateChiefActivity(int departmentId)
+        {
+            try
             {
-                await connection.OpenAsync();
-                using (var command = new SqlCommand(query, connection))
+                if (_chiefsByDepartment.TryGetValue(departmentId, out var chiefInfo))
                 {
-                    command.Parameters.AddWithValue("@ChiefId", chiefId);
+                    chiefInfo.LastActivityTime = DateTime.UtcNow;
+                    return true;
+                }
 
-                    using (var reader = await command.ExecuteReaderAsync())
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating chief activity for department {departmentId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Updates the department in the database with the current chief online status
+        /// </summary>
+        /// <param name="departmentId">The ID of the department</param>
+        /// <param name="dbService">The database service</param>
+        /// <returns>True if successful</returns>
+        public async Task<bool> UpdateDepartmentStatusInDatabaseAsync(int departmentId, ILynksDbService dbService)
+        {
+            try
+            {
+                var department = await dbService.GetDepartmentByIdAsync(departmentId);
+                if (department == null)
+                {
+                    _logger.LogWarning($"Department {departmentId} not found");
+                    return false;
+                }
+
+                var isChiefOnline = _chiefsByDepartment.ContainsKey(departmentId);
+                department.is_chief_online = isChiefOnline;
+                department.last_online_set_UTC = DateTime.UtcNow;
+                await dbService.UpdateDepartmentAsync(department);
+
+                _logger.LogInformation($"Department {departmentId} chief status updated to {(isChiefOnline ? "online" : "offline")} in database");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating department {departmentId} status in database");
+                return false;
+            }
+        }
+
+        private void CleanupChiefStatus(object state)
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                var inactivityThreshold = TimeSpan.FromMinutes(30); // Chiefs go offline after 30 minutes of inactivity
+                var departmentsToCleanup = new List<int>();
+
+                foreach (var entry in _chiefsByDepartment)
+                {
+                    var departmentId = entry.Key;
+                    var chiefInfo = entry.Value;
+
+                    if ((now - chiefInfo.LastActivityTime) > inactivityThreshold)
                     {
-                        if (await reader.ReadAsync())
-                        {
-                            DateTime lastOnlineTime = reader.GetDateTime(reader.GetOrdinal(DBProcessor.tableName_sql_lastOnlineSetUTC));
-                            bool isChiefOnline = reader.GetBoolean(reader.GetOrdinal(DBProcessor.tableName_sql_isChiefOnline));
-                            if (lastOnlineTime <= threshold || !isChiefOnline)
-                            {
-                                UpdateChiefSessionAsyncToAnotherValue(chiefId);  // Logic here should ensure the session is set appropriately
-                                return false;
-                            }
-                            else
-                            {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            return false;  // No session exists, potentially start a new one
-        }
-
-        private async Task UpdateChiefSessionAsyncToAnotherValue(int chiefId)
-        {
-            string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
-                           $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue " +
-                           $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                connection.Open();
-                using (var command = new SqlCommand(query, connection))
-                {
-                    command.Parameters.AddWithValue("@NewValue", false);
-                    command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                    await command.ExecuteNonQueryAsync();
-                }
-            }
-        }
-
-        public async Task<bool> IsChiefOnlineAsync(int chiefId)
-        {
-            string query = $"SELECT {DBProcessor.tableName_sql_isChiefOnline} " +
-                           $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
-                           $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-                using (var command = new SqlCommand(query, connection))
-                {
-                    command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                    var result = await command.ExecuteScalarAsync();
-                    return result != DBNull.Value && (bool)result; // Не до конца понимаю зачем здесь это, разберись позже как будет время. зачем точнее DBNull.Value и && с bool(result)
-                }
-            }
-        }
-    }*/
-}
-
-
-/*namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
-{
-    public class ChiefsManager //TODO: НИФИГА НЕ РАБОТАЕТ! ПЕРЕИСПРАВЛЯЙ :)
-    {
-        private readonly string _connectionString;
-        private readonly ConcurrentDictionary<int, System.Timers.Timer> _timers;
-
-        public ChiefsManager(IConfiguration configuration)
-        {
-            _connectionString = configuration.GetConnectionString("DefaultConnectionForUsers");
-            _timers = new ConcurrentDictionary<int, System.Timers.Timer>();
-        }
-
-        public async Task PingChiefAsync(int chiefId)
-        {
-            await UpdateChiefStatusAsync(chiefId, true);
-            ScheduleOfflineCheck(chiefId);
-        }
-
-        private void ScheduleOfflineCheck(int chiefId)
-        {
-            if (_timers.TryGetValue(chiefId, out var existingTimer))
-            {
-                existingTimer.Stop();
-                existingTimer.Dispose();
-            }
-
-            var timer = new System.Timers.Timer(60000); // 60 seconds
-            timer.Elapsed += async (sender, e) => await TimerElapsedAsync(chiefId);
-            timer.AutoReset = false;
-            timer.Start();
-
-            _timers[chiefId] = timer;
-        }
-
-        private async Task TimerElapsedAsync(int chiefId)
-        {
-            await CheckAndSetOfflineStatusAsync(chiefId);
-            _timers.TryRemove(chiefId, out _); // Remove the timer once the check is done
-        }
-
-        public async Task CheckAndSetOfflineStatusAsync(int chiefId)
-        {
-            Console.WriteLine($"Setting chief offline status: {chiefId}");
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                var currentTime = DateTime.UtcNow;
-                string query = $"SELECT {DBProcessor.tableName_sql_lastOnlineSetUTC} " +
-                               $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
-                               $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-
-                var command = new SqlCommand(query, connection);
-                command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                await connection.OpenAsync();
-                var result = await command.ExecuteScalarAsync();
-
-                if (result != null && result != DBNull.Value)
-                {
-                    var lastPingTime = (DateTime)result;
-                    if ((currentTime - lastPingTime).TotalSeconds >= 60)
-                    {
-                        await UpdateChiefStatusAsync(chiefId, false);
+                        departmentsToCleanup.Add(departmentId);
+                        _logger.LogInformation($"Chief {chiefInfo.ChiefId} for department {departmentId} has been automatically signed out due to inactivity");
                     }
                 }
-            }
-        }
 
-        private async Task UpdateChiefStatusAsync(int chiefId, bool isOnline)
-        {
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                string query = $"UPDATE {DBProcessor.tableName_sql_departments_NameDB} " +
-                               $"SET {DBProcessor.tableName_sql_isChiefOnline} = @NewValue, " +
-                               $"{DBProcessor.tableName_sql_lastOnlineSetUTC} = @LastPingTime " +
-                               $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-                var command = new SqlCommand(query, connection);
-                command.Parameters.AddWithValue("@NewValue", isOnline);
-                command.Parameters.AddWithValue("@LastPingTime", DateTime.UtcNow);
-                command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                await connection.OpenAsync();
-                await command.ExecuteNonQueryAsync();
-            }
-        }
-
-        public async Task<bool> IsChiefOnlineAsync(int chiefId)
-        {
-            using (var connection = new SqlConnection(_connectionString))
-            {
-                string query = $"SELECT {DBProcessor.tableName_sql_isChiefOnline} " +
-                            $"FROM {DBProcessor.tableName_sql_departments_NameDB} " +
-                            $"WHERE {DBProcessor.tableName_sql_departmentId} = @ChiefId";
-                var command = new SqlCommand(query, connection);
-                command.Parameters.AddWithValue("@ChiefId", chiefId);
-
-                await connection.OpenAsync();
-                var result = await command.ExecuteScalarAsync();
-
-                if (result != null && result != DBNull.Value)
+                foreach (var departmentId in departmentsToCleanup)
                 {
-                    return (bool)result;
+                    _chiefsByDepartment.TryRemove(departmentId, out _);
                 }
-                else
-                {
-                    return false; // or handle as appropriate
-                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during chief status cleanup");
             }
         }
     }
-}*/
+
+    /// <summary>
+    /// Information about a department chief
+    /// </summary>
+    public class ChiefInfo
+    {
+        public string ChiefId { get; set; }
+        public string ConnectionId { get; set; }
+        public DateTime LastActivityTime { get; set; }
+    }
+}

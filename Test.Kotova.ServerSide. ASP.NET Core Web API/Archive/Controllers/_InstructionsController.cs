@@ -52,7 +52,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
     [ApiController]
     [Route("[controller]")]
-    public class InstructionsController : ControllerBase
+    public class _InstructionsController : ControllerBase
     {
 
         public const double DEVIATION = 0.00001;
@@ -98,7 +98,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         private readonly ApplicationDBContextTechnicalDepartment _contextTechnicalDepartment;
         private readonly ApplicationDBContextManagement _contextManagement;
 
-        public InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment, ApplicationDBContextManagement contextManagement)
+        public _InstructionsController(MyDataService dataService, ApplicationDBContextGeneralConstr contextGeneralConstr, ApplicationDbContextUsers userContext, ApplicationDBContextTechnicalDepartment contextTechnicalDepartment, ApplicationDBContextManagement contextManagement)
         {
             _dataService = dataService;
             _contextGeneralConstr = contextGeneralConstr;
@@ -112,7 +112,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         private ApplicationDBContextBase GetDbContextForDepartmentId(int departmentId)
         {
-            return DepartmentMappings.GetDbContext(
+            return _DepartmentMappings.GetDbContext(
                 departmentId,
                 _contextGeneralConstr,
                 _contextTechnicalDepartment,
