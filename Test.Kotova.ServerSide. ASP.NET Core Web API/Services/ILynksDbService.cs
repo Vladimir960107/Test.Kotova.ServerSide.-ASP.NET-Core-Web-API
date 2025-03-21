@@ -205,10 +205,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
         }
         public async Task<string> GetEmployeeFullNameAsync(int personnelId, int departmentId)
         {
-            var employee = await _context.EmployeesByDepartment
-                .FirstOrDefaultAsync(e => e.personnel_id == personnelId && e.department_id == departmentId);
+            try
+            {
+                // First check if valid IDs were provided
+                if (personnelId <= 0 || departmentId <= 0)
+                {
+                    return string.Empty;
+                }
 
-            return employee?.full_name ?? string.Empty;
+                // Fetch the employee record
+                var employee = await _context.EmployeesByDepartment
+                    .FirstOrDefaultAsync(e => e.personnel_id == personnelId && e.department_id == departmentId);
+
+                // Return empty string if employee not found or full_name is null
+                return employee?.full_name ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (if you have a logger)
+                //_logger.LogError(ex, $"Error getting employee name for personnel ID {personnelId}, department ID {departmentId}");
+
+                // Return empty string instead of throwing exception
+                return string.Empty;
+            }
         }
     }
 }

@@ -161,7 +161,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API
                 }
 
                 // Hash the password
-                var passwordHash = BC.HashPassword(password);
+                var passwordHash = BC.HashPassword(password, workFactor: 12);
 
                 // Create new user object
                 var user = new User
