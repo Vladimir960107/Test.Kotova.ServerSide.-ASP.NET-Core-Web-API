@@ -13,9 +13,10 @@ using Newtonsoft.Json;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
-using Task = System.Threading.Tasks.Task;
 using Kotova.CommonClasses;
+using Task = System.Threading.Tasks.Task;
 using System.Globalization;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -39,6 +40,59 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             _logger = logger;
             _notificationsService = notificationsService;
         }
+
+
+
+        #region DTO STUFF (for another separate file)
+
+        // Create these classes either in a separate file or at the bottom of your controller file
+        public class InstructionResultDto
+        {
+            public int InstructionId { get; set; }
+            public string CauseOfInstruction { get; set; }
+            public DateTime BeginDate { get; set; }
+            public DateTime EndDate { get; set; }
+            public byte TypeOfInstruction { get; set; }
+            public bool IsAssignedToPeople { get; set; }
+            public bool IsPassedByEveryone { get; set; }
+            public List<string> FilePaths { get; set; } = new List<string>();
+
+            // Optional: Add a property for the instruction type name
+            public string TypeName { get; set; }
+        }
+
+        // Helper method to map from entity to DTO
+        private InstructionResultDto MapToDto(Models.Instruction instruction, List<string> filePaths)
+        {
+            return new InstructionResultDto
+            {
+                InstructionId = instruction.instruction_id,
+                CauseOfInstruction = instruction.cause_of_instruction,
+                BeginDate = instruction.begin_date,
+                EndDate = instruction.end_date,
+                TypeOfInstruction = instruction.type_of_instruction,
+                IsAssignedToPeople = instruction.is_assigned_to_people,
+                IsPassedByEveryone = instruction.is_passed_by_everyone,
+                FilePaths = filePaths ?? new List<string>(),
+                TypeName = GetInstructionTypeName(instruction.type_of_instruction)
+            };
+        }
+
+        // Helper method to get the instruction type name
+        private string GetInstructionTypeName(byte typeCode)
+        {
+            return typeCode switch
+            {
+                0 => "Вводный",
+                1 => "Внеплановый",
+                2 => "Первичный",
+                3 => "Повторный",
+                4 => "Повторный (для водителей)",
+                5 => "Целевой",
+                _ => "Неизвестный тип"
+            };
+        }
+        #endregion
 
         #region UserRegion
 
@@ -463,115 +517,406 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return BadRequest("User not found in the database.");
                 }
 
-                // Get the department ID for the current user
-                int departmentId = user.department_id;
-
                 // Process the instruction assignment
-                return await ProcessInstructionAssignment(package, user);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error sending instruction to names");
-                return BadRequest($"An error occurred while processing the instruction: {ex.Message}");
-            }
-        }
-
-        private async Task<IActionResult> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
-        {
-            using (var transaction = await _dbContext.Database.BeginTransactionAsync())
-            {
                 try
                 {
-                    // Find the instruction by its cause
-                    var instruction = await _dbContext.Instructions
-                        .FirstOrDefaultAsync(i => i.cause_of_instruction == package.InstructionCause);
-
-                    if (instruction == null)
-                    {
-                        return NotFound($"Instruction with cause '{package.InstructionCause}' not found.");
-                    }
-
-                    // Mark the instruction as assigned to people
-                    instruction.is_assigned_to_people = true;
-                    _dbContext.Instructions.Update(instruction);
-                    await _dbContext.SaveChangesAsync();
-
-                    // Find personnel IDs based on names and birthdates
-                    var namesList = package.NamesAndBirthDates.Select(t => t.Item1).ToList();
-                    var birthdatesList = package.NamesAndBirthDates
-                        .Select(t => DateTime.ParseExact(t.Item2, "yyyy-MM-dd", CultureInfo.InvariantCulture))
-                        .ToList();
-
-                    // Find matching personnel records
-                    var personnel = await _dbContext.Personnel
-                        .Join(_dbContext.EmployeesByDepartment,
-                            p => p.personnel_id,
-                            e => e.personnel_id,
-                            (p, e) => new { Personnel = p, Employee = e })
-                        .Where(x => namesList.Contains(x.Employee.full_name) &&
-                                   birthdatesList.Contains(x.Employee.birth_date) &&
-                                   x.Employee.department_id == currentUser.department_id)
-                        .Select(x => x.Personnel)
-                        .ToListAsync();
-
-                    if (!personnel.Any())
-                    {
-                        return BadRequest("No matching personnel found for the provided names and birthdates.");
-                    }
-
-                    // Create instruction status records for each personnel
-                    foreach (var person in personnel)
-                    {
-                        var existingStatus = await _dbContext.InstructionStatuses
-                            .FirstOrDefaultAsync(s => s.instruction_id == instruction.instruction_id &&
-                                                     s.personnel_id == person.personnel_id);
-
-                        if (existingStatus == null)
-                        {
-                            var instructionStatus = new InstructionStatus
-                            {
-                                instruction_id = instruction.instruction_id,
-                                personnel_id = person.personnel_id,
-                                department_id = currentUser.department_id,
-                                is_instruction_passed = false,
-                                when_was_sent_to_user = DateTime.Now,
-                                when_was_sent_to_user_UTC = DateTime.UtcNow,
-                                was_signed_by_personnel_id = currentUser.personnel_id
-                            };
-
-                            _dbContext.InstructionStatuses.Add(instructionStatus);
-                        }
-                    }
-
-                    await _dbContext.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    // Send notifications to the assigned personnel
-                    foreach (var person in personnel)
-                    {
-                        var userWithPersonnel = await _dbContext.Users
-                            .FirstOrDefaultAsync(u => u.personnel_id == person.personnel_id);
-
-                        if (userWithPersonnel != null)
-                        {
-                            await _notificationsService.SendUserNotificationAsync(
-                                userWithPersonnel.id,
-                                $"You have been assigned a new instruction: {instruction.cause_of_instruction}",
-                                currentUser.id);
-                        }
-                    }
-
-                    return Ok($"Instruction '{package.InstructionCause}' has been assigned to {personnel.Count} people.");
+                    var result = await ProcessInstructionAssignment(package, user);
+                    return Ok(result);
                 }
                 catch (Exception ex)
                 {
-                    await transaction.RollbackAsync();
-                    _logger.LogError(ex, "Error processing instruction assignment");
-                    throw;
+                    _logger.LogError(ex, "Error sending instruction to names");
+                    return BadRequest($"Error sending instruction: {ex.Message}");
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SendInstructionToNames");
+                return BadRequest($"An error occurred: {ex.Message}");
+            }
         }
-    }
 
-    #endregion
+        private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
+        {
+            // Create an execution strategy
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+            // Execute the transaction with the strategy and return a result
+            return await strategy.ExecuteAsync<string>(async () =>
+            {
+                // Start transaction inside the execution strategy
+                using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+                {
+                    try
+                    {
+                        // Find the instruction by its cause
+                        var instruction = await _dbContext.Instructions
+                            .FirstOrDefaultAsync(i => i.cause_of_instruction == package.InstructionCause);
+
+                        if (instruction == null)
+                        {
+                            throw new InvalidOperationException($"Instruction with cause '{package.InstructionCause}' not found.");
+                        }
+
+                        // Mark the instruction as assigned to people
+                        instruction.is_assigned_to_people = true;
+                        _dbContext.Instructions.Update(instruction);
+                        await _dbContext.SaveChangesAsync();
+
+                        // Find personnel IDs based on names and birthdates
+                        var namesList = package.NamesAndBirthDates.Select(t => t.Item1).ToList();
+                        var birthdatesList = package.NamesAndBirthDates
+                            .Select(t => DateTime.ParseExact(t.Item2, "yyyy-MM-dd", CultureInfo.InvariantCulture))
+                            .ToList();
+
+                        // Query for matching personnel records with NULL handling
+                        var query = _dbContext.Personnel
+                            .Join(_dbContext.EmployeesByDepartment,
+                                p => p.personnel_id,
+                                e => e.personnel_id,
+                                (p, e) => new {
+                                    Personnel = p,
+                                    Employee = e
+                                })
+                            .Where(x => namesList.Contains(x.Employee.full_name) &&
+                                   birthdatesList.Contains(x.Employee.birth_date) &&
+                                   x.Employee.department_id == currentUser.department_id);
+
+                        // Execute query and handle results carefully
+                        var personnelRecords = await query.ToListAsync();
+
+                        var personnel = personnelRecords
+                            .Select(x => x.Personnel)
+                            .Where(p => p != null)  // Filter out any null records
+                            .ToList();
+
+                        if (!personnel.Any())
+                        {
+                            throw new InvalidOperationException("No matching personnel found for the provided names and birthdates.");
+                        }
+
+                        // Create instruction status records for each personnel
+                        int assignmentCount = 0;
+                        foreach (var person in personnel)
+                        {
+                            // Safety check for null IDs
+                            if (person.personnel_id <= 0 || currentUser.department_id <= 0 || instruction.instruction_id <= 0)
+                            {
+                                continue; // Skip invalid records
+                            }
+
+                            var existingStatus = await _dbContext.InstructionStatuses
+                                .FirstOrDefaultAsync(s => s.instruction_id == instruction.instruction_id &&
+                                                         s.personnel_id == person.personnel_id);
+
+                            if (existingStatus == null)
+                            {
+                                var instructionStatus = new InstructionStatus
+                                {
+                                    instruction_id = instruction.instruction_id,
+                                    personnel_id = person.personnel_id,
+                                    department_id = currentUser.department_id,
+                                    is_instruction_passed = false,
+                                    when_was_sent_to_user = DateTime.Now,
+                                    when_was_sent_to_user_UTC = DateTime.UtcNow,
+                                    was_signed_by_personnel_id = currentUser.personnel_id
+                                };
+
+                                _dbContext.InstructionStatuses.Add(instructionStatus);
+                                assignmentCount++;
+                            }
+                        }
+
+                        if (assignmentCount > 0)
+                        {
+                            await _dbContext.SaveChangesAsync();
+                        }
+
+                        await transaction.CommitAsync();
+
+                        // Result will be the count of personnel that were assigned
+                        return $"Instruction '{package.InstructionCause}' has been assigned to {assignmentCount} people.";
+                    }
+                    catch (Exception ex)
+                    {
+                        // Only roll back if the transaction is still active
+                        if (transaction.GetDbTransaction().Connection != null)
+                        {
+                            try
+                            {
+                                await transaction.RollbackAsync();
+                            }
+                            catch (Exception rollbackEx)
+                            {
+                                _logger.LogError(rollbackEx, "Error rolling back transaction");
+                            }
+                        }
+                        throw; // Rethrow to be handled by the caller
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// Sends an instruction to a list of personnel based on names and birthdates.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to send a specific instruction 
+        /// to personnel identified by their names and birthdates. The function validates and processes the instruction 
+        /// and creates the corresponding instruction status records.
+        /// </remarks>
+        /// <param name="package">
+        /// The package containing the instruction details and a list of names and birthdates.
+        /// </param>
+        /// <returns>
+        /// Returns an OK response if the instruction is successfully sent and processed. 
+        /// Returns a BadRequest response if there is an error in the package or during processing.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction was successfully sent to the specified personnel.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The package is null or invalid.
+        /// - An error occurred during instruction processing.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated or their username claim is missing.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <summary>
+        /// Adds a new instruction into the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to add a new instruction 
+        /// to the database. The instruction details include cause, date range, type, and file paths.
+        /// </remarks>
+        /// <param name="request">The instruction details to be added</param>
+        /// <returns>
+        /// Returns the created instruction if successful, or appropriate error responses.
+        /// </returns>
+        /// <response code="200">The instruction was successfully added to the database</response>
+        /// <response code="400">The instruction data is invalid or there was an error processing the request</response>
+        /// <response code="401">The user is not authenticated</response>
+        /// <response code="403">The user doesn't have permission to add instructions</response>
+        [HttpPost("add-new-instruction-into-db")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] AddInstructionRequest request)
+        {
+            try
+            {
+                if (request == null || request.Instruction == null)
+                {
+                    return BadRequest("Instruction data is missing");
+                }
+
+                // Get current user and department
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim not found");
+                }
+
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.username == username);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found in database");
+                }
+
+                int departmentId = user.department_id;
+
+                // Create a new instruction entity
+                var instruction = new Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models.Instruction
+                {
+                    cause_of_instruction = request.Instruction.CauseOfInstruction,
+                    begin_date = DateTime.UtcNow, // Always use current time for begin_date
+                    end_date = request.Instruction.EndDate,
+                    type_of_instruction = request.Instruction.TypeOfInstruction,
+                    is_passed_by_everyone = false, // Always start as not passed
+                    is_assigned_to_people = false, // Not assigned to people yet
+                    department_id = departmentId
+                };
+
+                // Special case for department ID 5 (Management)
+                if (departmentId == 5)
+                {
+                    instruction.is_assigned_to_people = true;
+                }
+
+                // Create an execution strategy
+                var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+                // Execute the transaction with the strategy
+                try
+                {
+                    var resultDto = await strategy.ExecuteAsync<InstructionResultDto>(async () =>
+                    {
+                        // Start transaction inside the execution strategy
+                        using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+                        {
+                            try
+                            {
+                                // Check if an instruction with the same cause already exists
+                                var existingInstruction = await _dbContext.Instructions
+                                    .FirstOrDefaultAsync(i =>
+                                        i.cause_of_instruction == instruction.cause_of_instruction &&
+                                        i.department_id == departmentId);
+
+                                if (existingInstruction != null)
+                                {
+                                    throw new InvalidOperationException("An instruction with the same cause already exists");
+                                }
+
+                                // Add the instruction to the database
+                                _dbContext.Instructions.Add(instruction);
+                                await _dbContext.SaveChangesAsync();
+
+                                // Track added file paths
+                                List<string> addedFilePaths = new List<string>();
+
+                                // Add file paths if they exist
+                                if (request.Paths != null && request.Paths.Any())
+                                {
+                                    foreach (var path in request.Paths)
+                                    {
+                                        var filePathEntity = new FilePathForInstruction
+                                        {
+                                            instruction_id = instruction.instruction_id,
+                                            file_path = path,
+                                            instruction_name = instruction.cause_of_instruction
+                                        };
+
+                                        _dbContext.FilePathsForInstructions.Add(filePathEntity);
+                                        addedFilePaths.Add(path);
+                                    }
+
+                                    await _dbContext.SaveChangesAsync();
+                                }
+                                // If there's a path_to_instruction but no paths, add it as a file path
+                                else if (!string.IsNullOrEmpty(request.Instruction.PathToInstruction))
+                                {
+                                    var filePathEntity = new FilePathForInstruction
+                                    {
+                                        instruction_id = instruction.instruction_id,
+                                        file_path = request.Instruction.PathToInstruction,
+                                        instruction_name = instruction.cause_of_instruction
+                                    };
+
+                                    _dbContext.FilePathsForInstructions.Add(filePathEntity);
+                                    addedFilePaths.Add(request.Instruction.PathToInstruction);
+                                    await _dbContext.SaveChangesAsync();
+                                }
+
+                                await transaction.CommitAsync();
+
+                                // Map entity to DTO for response
+                                return MapToDto(instruction, addedFilePaths);
+                            }
+                            catch (Exception ex)
+                            {
+                                await transaction.RollbackAsync();
+                                throw; // Rethrow to be caught by the outer try-catch
+                            }
+                        }
+                    });
+
+                    // Notify relevant parties about the new instruction (outside the transaction)
+                    await _notificationsService.NotifyNewInstructionAsync(instruction);
+
+                    // Return the created instruction DTO
+                    return Ok(resultDto);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // Handle specific validation errors
+                    return BadRequest(ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error in database operation");
+                    return BadRequest($"Error saving instruction: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error adding new instruction");
+                return BadRequest($"An error occurred: {ex.Message}");
+            }
+        }
+
+
+        /// <summary>
+        /// Class for handling full instruction data with file paths
+        /// </summary>
+        public class FullCustomInstruction
+        {
+            /// <summary>
+            /// The instruction entity (CommonClasses version used for transfer)
+            /// </summary>
+            public Models.Instruction _instruction { get; set; }
+
+            /// <summary>
+            /// List of file paths associated with the instruction
+            /// </summary>
+            public List<string> _paths { get; set; }
+
+            public FullCustomInstruction() { }
+
+            public FullCustomInstruction(Models.Instruction instruction, List<string> paths)
+            {
+                _instruction = instruction;
+                _paths = paths;
+            }
+        }
+
+        /// <summary>
+        /// Data transfer object for adding new instructions
+        /// </summary>
+        public class AddInstructionRequest
+        {
+            /// <summary>
+            /// The instruction details
+            /// </summary>
+            public InstructionDto Instruction { get; set; }
+
+            /// <summary>
+            /// List of file paths associated with the instruction
+            /// </summary>
+            public List<string> Paths { get; set; }
+
+            /// <summary>
+            /// DTO for instruction data
+            /// </summary>
+            public class InstructionDto
+            {
+                /// <summary>
+                /// The cause or reason for the instruction
+                /// </summary>
+                public string CauseOfInstruction { get; set; }
+
+                /// <summary>
+                /// The end date of the instruction
+                /// </summary>
+                public DateTime EndDate { get; set; }
+
+                /// <summary>
+                /// Main path to the instruction folder
+                /// </summary>
+                public string PathToInstruction { get; set; }
+
+                /// <summary>
+                /// Type of instruction (0=Introductory, 1=Unplanned, 2=Primary, etc.)
+                /// </summary>
+                public byte TypeOfInstruction { get; set; }
+            }
+        }
+
+
+        #endregion
+    }
 }

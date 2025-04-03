@@ -57,14 +57,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 
         [Required]
         [StringLength(255)]
-        public string full_name { get; set; }
+        public string full_name { get; set; } = string.Empty;
 
         [Required]
         [StringLength(255)]
-        public string job_position { get; set; }
+        public string job_position { get; set; } = string.Empty;
 
         [StringLength(255)]
-        public string group { get; set; }
+        public string? group { get; set; } // Mark as nullable
 
         [Required]
         [Column(TypeName = "date")]
@@ -78,10 +78,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 
         // Navigation properties
         [ForeignKey("personnel_id")]
-        public virtual Personnel Personnel { get; set; }
+        public virtual Personnel? Personnel { get; set; }
 
         [ForeignKey("department_id")]
-        public virtual Department Department { get; set; }
+        public virtual Department? Department { get; set; }
     }
 
     // Instruction entity
@@ -274,22 +274,22 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
         public int personnel_id { get; set; }
 
         [StringLength(70)]
-        public string current_email { get; set; }
+        public string? current_email { get; set; }
 
         public int department_id { get; set; }
 
         [StringLength(50)]
-        public string desk_number { get; set; }
+        public string? desk_number { get; set; }
 
         // Navigation properties
         [ForeignKey("user_role_id")]
-        public virtual Role Role { get; set; }
+        public virtual Role? Role { get; set; }
 
         [ForeignKey("personnel_id")]
-        public virtual Personnel Personnel { get; set; }
+        public virtual Personnel? Personnel { get; set; }
 
         [ForeignKey("department_id")]
-        public virtual Department Department { get; set; }
+        public virtual Department? Department { get; set; }
     }
 
     // Add this to your EntityModels.cs file
