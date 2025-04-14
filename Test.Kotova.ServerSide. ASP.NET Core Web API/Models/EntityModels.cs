@@ -326,4 +326,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
         public virtual Department Department { get; set; }
     }
 
+
+    #region Normative Instructions
+    public class NormativeInstructionCreateModel
+    {
+        [Required]
+        [StringLength(255)]
+        public string Name { get; set; }
+
+        public string Url { get; set; }
+    }
+
+    public class NormativeInstructionUpdateModel
+    {
+        [Required]
+        [StringLength(255)]
+        public string Name { get; set; }
+
+        public string Url { get; set; }
+    }
+    #endregion
 }

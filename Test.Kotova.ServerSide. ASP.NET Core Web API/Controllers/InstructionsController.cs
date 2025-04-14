@@ -17,6 +17,7 @@ using Kotova.CommonClasses;
 using Task = System.Threading.Tasks.Task;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.ComponentModel.DataAnnotations;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -623,6 +624,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                 };
 
                                 _dbContext.InstructionStatuses.Add(instructionStatus);
+                                await _dbContext.SaveChangesAsync(); // Save to get the ID
+
+                                // If normative instruction IDs are provided, add them to the junction table
+                                if (package.NormativeInstructionNameIds != null && package.NormativeInstructionNameIds.Any())
+                                {
+                                    foreach (var normativeId in package.NormativeInstructionNameIds)
+                                    {
+                                        var junction = new InstructionStatusToNormativeInstrName
+                                        {
+                                            instruction_status_id = instructionStatus.id,
+                                            normative_instruction_name_id = normativeId
+                                        };
+
+                                        _dbContext.InstructionStatusToNormativeInstrNames.Add(junction);
+                                    }
+                                }
+
                                 assignmentCount++;
                             }
                         }
@@ -916,7 +934,430 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        /// <summary>
+        /// Exports data about instructions for a department within a specified date range.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to export information 
+        /// about instructions that have been passed by employees in the department. The export can be filtered by 
+        /// a date range and specific types of instructions.
+        /// </remarks>
+        /// <param name="instructionExportRequest">
+        /// An object containing the start date, end date, and a list of instruction types to filter the export.
+        /// </param>
+        /// <returns>
+        /// Returns a list of instruction data if the operation is successful. 
+        /// Returns appropriate error responses if the user lacks permissions, or if any required data is missing or invalid.
+        /// </returns>
+        /// <response code="200">
+        /// The instruction data was successfully retrieved and exported.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to one of the following reasons:
+        /// - The export request object is null or invalid.
+        /// - The department or role could not be identified for the user.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred during the data export process.
+        /// </response>
+        [HttpPost("instructions-data-export")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> InstructionsDataExport([FromBody] InstructionExportRequest instructionExportRequest)
+        {
+            if (instructionExportRequest == null)
+            {
+                return BadRequest("Export request cannot be null");
+            }
 
+            try
+            {
+                // Get current user's information
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user's department
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+
+                // Set up date range
+                var startDate = instructionExportRequest.StartDate;
+                var endDate = instructionExportRequest.EndDate.AddDays(1); // Include the end date
+
+                // Get instruction types to filter by
+                var instructionTypes = instructionExportRequest.InstructionTypes;
+                if (instructionTypes == null || instructionTypes.Count == 0)
+                {
+                    return BadRequest("At least one instruction type must be specified");
+                }
+
+                // Query the database for instruction statuses
+                var passedInstructions = await _dbContext.InstructionStatuses
+                    .Where(status =>
+                        status.department_id == departmentId &&
+                        status.is_instruction_passed &&
+                        instructionTypes.Contains(status.Instruction.type_of_instruction) &&
+                        status.date_when_passed >= startDate &&
+                        status.date_when_passed <= endDate)
+                    .Include(status => status.Instruction)
+                        .ThenInclude(i => i.FilePaths)
+                    .Include(status => status.Instruction)
+                        .ThenInclude(i => i.InstructionType)
+                    .Include(status => status.Personnel)
+                        .ThenInclude(p => p.EmployeesByDepartment)
+                    .OrderBy(status => status.date_when_passed)
+                    .ToListAsync();
+
+                // Transform query results into the response model
+                var result = new List<InstructionExportInstance>();
+
+                foreach (var status in passedInstructions)
+                {
+                    // Get the employee details
+                    var employee = status.Personnel.EmployeesByDepartment
+                        .FirstOrDefault(e => e.department_id == departmentId);
+
+                    if (employee == null) continue;
+
+                    // Get the name of the person who conducted the instruction
+                    string conductedBy = "Unknown";
+                    if (status.was_signed_by_personnel_id > 0)
+                    {
+                        var conductor = await _dbContext.Users
+                            .Include(u => u.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment)
+                            .FirstOrDefaultAsync(u => u.personnel_id == status.was_signed_by_personnel_id);
+
+                        if (conductor != null)
+                        {
+                            var conductorEmployee = conductor.Personnel.EmployeesByDepartment
+                                .FirstOrDefault();
+
+                            if (conductorEmployee != null)
+                            {
+                                conductedBy = $"{conductorEmployee.full_name} - {conductorEmployee.job_position}";
+                            }
+                        }
+                    }
+
+                    // Get the file paths for this instruction
+                    var filePaths = status.Instruction.FilePaths
+                        .Select(fp => fp.file_path)
+                        .Where(p => p != null)
+                        .ToList();
+
+                    // Create a string with all file names
+                    string fileNamesString = string.Join(" ",
+                        filePaths.Select(path =>
+                        {
+                            var pathParts = path.Split('\\');
+                            return pathParts.Length > 0 ? pathParts[pathParts.Length - 1] : path;
+                        })
+                    );
+
+                    // Create the export instance
+                    var exportInstance = new InstructionExportInstance
+                    {
+                        InstructionId = status.instruction_id,
+                        DateWhenPassedByEmployee = status.date_when_passed ?? DateTime.Now,
+                        FullNameOfEmployee = employee.full_name,
+                        PositionOfEmployee = employee.job_position,
+                        BirthDateOfEmployee = employee.birth_date,
+                        InstructionType = status.Instruction.type_of_instruction,
+                        CauseOfInstruction = status.Instruction.cause_of_instruction,
+                        FullNameOfEmployeeWhoConductedInstruction = conductedBy,
+                        FileNamesOfInstruction = filePaths,
+                        FileNamesOfInstructionInOneString = fileNamesString
+                    };
+
+                    result.Add(exportInstance);
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error exporting instruction data");
+                return StatusCode(500, "Internal server error during data export");
+            }
+        }
+
+        // Additional class for the DTO
+        public class InstructionExportRequest
+        {
+            // Required properties
+            [Required]
+            public DateTime StartDate { get; set; }
+
+            [Required]
+            public DateTime EndDate { get; set; }
+
+            [Required]
+            [MinLength(1, ErrorMessage = "At least one instruction type must be specified")]
+            public List<byte> InstructionTypes { get; set; }
+        }
+
+        #endregion
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        #region Normative Instructions
+
+        /// <summary>
+        /// Retrieves all normative instruction names from the database.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to retrieve a list of all
+        /// normative instruction names stored in the database.
+        /// </remarks>
+        /// <returns>
+        /// Returns a list of normative instruction names if successful.
+        /// </returns>
+        /// <response code="200">
+        /// The list of normative instruction names was successfully retrieved.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred while retrieving normative instruction names.
+        /// </response>
+        [HttpGet("normative-instructions")]
+        [Authorize]
+        public async Task<IActionResult> GetNormativeInstructions()
+        {
+            try
+            {
+                var normativeInstructions = await _dbContext.NormativeInstructionNames.ToListAsync();
+
+                // Map to DTOs explicitly to ensure proper property mapping
+                var result = normativeInstructions.Select(ni => new
+                {
+                    Id = ni.id,
+                    Name = ni.normative_instruction_name,
+                    Url = ni.url,
+                    CreatedAt = ni.created_at
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving normative instruction names");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Creates a new normative instruction name.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to create a new
+        /// normative instruction name in the database.
+        /// </remarks>
+        /// <param name="model">The normative instruction to create</param>
+        /// <returns>
+        /// Returns the created normative instruction if successful.
+        /// </returns>
+        /// <response code="201">
+        /// The normative instruction was successfully created.
+        /// </response>
+        /// <response code="400">
+        /// Bad request - The model is invalid.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred while creating the normative instruction.
+        /// </response>
+        [HttpPost("normative-instructions")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> CreateNormativeInstruction([FromBody] NormativeInstructionCreateModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                var normativeInstruction = new NormativeInstructionName
+                {
+                    normative_instruction_name = model.Name,
+                    url = model.Url,
+                    created_at = DateTime.UtcNow
+                };
+
+                _dbContext.NormativeInstructionNames.Add(normativeInstruction);
+                await _dbContext.SaveChangesAsync();
+
+                return CreatedAtAction(nameof(GetNormativeInstructions), null, normativeInstruction);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating normative instruction name");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Updates an existing normative instruction name.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to update an existing
+        /// normative instruction name in the database.
+        /// </remarks>
+        /// <param name="id">The ID of the normative instruction to update</param>
+        /// <param name="model">The updated normative instruction data</param>
+        /// <returns>
+        /// Returns the updated normative instruction if successful.
+        /// </returns>
+        /// <response code="200">
+        /// The normative instruction was successfully updated.
+        /// </response>
+        /// <response code="400">
+        /// Bad request - The model is invalid.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="404">
+        /// Not found - The normative instruction with the specified ID was not found.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred while updating the normative instruction.
+        /// </response>
+        [HttpPut("normative-instructions/{id}")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> UpdateNormativeInstruction(int id, [FromBody] NormativeInstructionUpdateModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                var normativeInstruction = await _dbContext.NormativeInstructionNames.FindAsync(id);
+                if (normativeInstruction == null)
+                {
+                    return NotFound($"Normative instruction with ID {id} not found");
+                }
+
+                normativeInstruction.normative_instruction_name = model.Name;
+                normativeInstruction.url = model.Url;
+
+                _dbContext.NormativeInstructionNames.Update(normativeInstruction);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(normativeInstruction);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating normative instruction with ID {id}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Deletes a normative instruction name.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators or Administrators) to delete a
+        /// normative instruction name from the database.
+        /// </remarks>
+        /// <param name="id">The ID of the normative instruction to delete</param>
+        /// <returns>
+        /// Returns no content if successful.
+        /// </returns>
+        /// <response code="204">
+        /// The normative instruction was successfully deleted.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="404">
+        /// Not found - The normative instruction with the specified ID was not found.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred while deleting the normative instruction.
+        /// </response>
+        [HttpDelete("normative-instructions/{id}")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> DeleteNormativeInstruction(int id)
+        {
+            try
+            {
+                var normativeInstruction = await _dbContext.NormativeInstructionNames.FindAsync(id);
+                if (normativeInstruction == null)
+                {
+                    return NotFound($"Normative instruction with ID {id} not found");
+                }
+
+                // Check if the normative instruction is referenced by any instruction status
+                var isReferenced = await _dbContext.InstructionStatusToNormativeInstrNames
+                    .AnyAsync(link => link.normative_instruction_name_id == id);
+
+                if (isReferenced)
+                {
+                    return BadRequest($"Cannot delete normative instruction with ID {id} because it is referenced by one or more instruction statuses");
+                }
+
+                _dbContext.NormativeInstructionNames.Remove(normativeInstruction);
+                await _dbContext.SaveChangesAsync();
+
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting normative instruction with ID {id}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        // Model classes for endpoints
+        
         #endregion
     }
 }
