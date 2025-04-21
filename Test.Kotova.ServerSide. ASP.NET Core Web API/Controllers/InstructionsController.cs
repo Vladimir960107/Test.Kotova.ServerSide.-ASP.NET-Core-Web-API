@@ -1357,7 +1357,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         // Model classes for endpoints
-        
+
         #endregion
     }
 }
