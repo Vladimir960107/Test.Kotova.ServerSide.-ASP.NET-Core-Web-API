@@ -1359,5 +1359,376 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         // Model classes for endpoints
 
         #endregion
+
+        #region Instructions Chief CRUD
+
+        /// <summary>
+        /// Retrieves all instructions for the authenticated user's department.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to retrieve
+        /// all instructions associated with their department, for management purposes.
+        /// </remarks>
+        /// <returns>
+        /// A list of all instructions in the user's department.
+        /// </returns>
+        /// <response code="200">The list of instructions was successfully retrieved.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
+        /// <response code="500">Internal server error occurred during retrieval.</response>
+        [HttpGet("get-all-instructions")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetAllInstructions()
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Get all instructions for the department
+                var instructions = await _dbContext.Instructions
+                    .Where(i => i.department_id == user.department_id)
+                    .Include(i => i.InstructionType)
+                    .Include(i => i.FilePaths)
+                    .ToListAsync();
+
+                // Map to DTOs
+                var result = instructions.Select(i => new
+                {
+                    i.instruction_id,
+                    i.cause_of_instruction,
+                    i.begin_date,
+                    i.end_date,
+                    i.type_of_instruction,
+                    i.is_assigned_to_people,
+                    i.is_passed_by_everyone,
+                    TypeName = i.InstructionType?.name_of_type_instruction,
+                    FilePaths = i.FilePaths.Select(fp => fp.file_path).ToList()
+                }).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving all instructions");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Retrieves a specific instruction by ID.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users to retrieve details of a specific instruction by its ID.
+        /// </remarks>
+        /// <param name="id">The ID of the instruction to retrieve</param>
+        /// <returns>
+        /// The requested instruction details if found.
+        /// </returns>
+        /// <response code="200">The instruction was successfully retrieved.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
+        /// <response code="404">Not Found - The specified instruction was not found.</response>
+        /// <response code="500">Internal server error occurred during retrieval.</response>
+        [HttpGet("get-instruction/{id}")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetInstructionById(int id)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Get the instruction by ID, ensuring it belongs to the user's department
+                var instruction = await _dbContext.Instructions
+                    .Include(i => i.InstructionType)
+                    .Include(i => i.FilePaths)
+                    .FirstOrDefaultAsync(i => i.instruction_id == id && i.department_id == user.department_id);
+
+                if (instruction == null)
+                {
+                    return NotFound($"Instruction with ID {id} not found");
+                }
+
+                // Map to DTO
+                var result = new
+                {
+                    instruction.instruction_id,
+                    instruction.cause_of_instruction,
+                    instruction.begin_date,
+                    instruction.end_date,
+                    instruction.type_of_instruction,
+                    instruction.is_assigned_to_people,
+                    instruction.is_passed_by_everyone,
+                    TypeName = instruction.InstructionType?.name_of_type_instruction,
+                    FilePaths = instruction.FilePaths.Select(fp => fp.file_path).ToList()
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error retrieving instruction with ID {id}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Updates an existing instruction.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users to update an existing instruction's details.
+        /// </remarks>
+        /// <param name="id">The ID of the instruction to update</param>
+        /// <param name="instructionDto">The updated instruction data</param>
+        /// <returns>
+        /// The updated instruction if successful.
+        /// </returns>
+        /// <response code="200">The instruction was successfully updated.</response>
+        /// <response code="400">Bad request - The provided data was invalid.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
+        /// <response code="404">Not Found - The specified instruction was not found.</response>
+        /// <response code="500">Internal server error occurred during update.</response>
+        [HttpPut("update-instruction/{id}")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> UpdateInstruction(int id, [FromBody] UpdateInstructionDto instructionDto)
+        {
+            if (instructionDto == null)
+            {
+                return BadRequest("Instruction data is missing");
+            }
+
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Get the instruction by ID, ensuring it belongs to the user's department
+                var instruction = await _dbContext.Instructions
+                    .FirstOrDefaultAsync(i => i.instruction_id == id && i.department_id == user.department_id);
+
+                if (instruction == null)
+                {
+                    return NotFound($"Instruction with ID {id} not found");
+                }
+
+                // Update the instruction properties
+                instruction.cause_of_instruction = instructionDto.CauseOfInstruction;
+                instruction.end_date = instructionDto.EndDate;
+                instruction.type_of_instruction = instructionDto.TypeOfInstruction;
+
+                // Save changes
+                _dbContext.Instructions.Update(instruction);
+                await _dbContext.SaveChangesAsync();
+
+                // Handle file paths update if needed
+                if (instructionDto.FilePaths != null)
+                {
+                    // Remove existing file paths
+                    var existingPaths = await _dbContext.FilePathsForInstructions
+                        .Where(fp => fp.instruction_id == id)
+                        .ToListAsync();
+
+                    _dbContext.FilePathsForInstructions.RemoveRange(existingPaths);
+                    await _dbContext.SaveChangesAsync();
+
+                    // Add new file paths
+                    foreach (var path in instructionDto.FilePaths)
+                    {
+                        var filePathEntity = new FilePathForInstruction
+                        {
+                            instruction_id = id,
+                            file_path = path,
+                            instruction_name = instruction.cause_of_instruction
+                        };
+
+                        _dbContext.FilePathsForInstructions.Add(filePathEntity);
+                    }
+
+                    await _dbContext.SaveChangesAsync();
+                }
+
+                // Return the updated instruction
+                var updatedInstruction = await _dbContext.Instructions
+                    .Include(i => i.InstructionType)
+                    .Include(i => i.FilePaths)
+                    .FirstOrDefaultAsync(i => i.instruction_id == id);
+
+                var result = new
+                {
+                    updatedInstruction.instruction_id,
+                    updatedInstruction.cause_of_instruction,
+                    updatedInstruction.begin_date,
+                    updatedInstruction.end_date,
+                    updatedInstruction.type_of_instruction,
+                    updatedInstruction.is_assigned_to_people,
+                    updatedInstruction.is_passed_by_everyone,
+                    TypeName = updatedInstruction.InstructionType?.name_of_type_instruction,
+                    FilePaths = updatedInstruction.FilePaths.Select(fp => fp.file_path).ToList()
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating instruction with ID {id}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Deletes an instruction.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users to delete an instruction by its ID.
+        /// </remarks>
+        /// <param name="id">The ID of the instruction to delete</param>
+        /// <returns>
+        /// A success message if the instruction was deleted successfully.
+        /// </returns>
+        /// <response code="200">The instruction was successfully deleted.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role or cannot delete this instruction.</response>
+        /// <response code="404">Not Found - The specified instruction was not found.</response>
+        /// <response code="500">Internal server error occurred during deletion.</response>
+        [HttpDelete("delete-instruction/{id}")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> DeleteInstruction(int id)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Get the instruction by ID, ensuring it belongs to the user's department
+                var instruction = await _dbContext.Instructions
+                    .FirstOrDefaultAsync(i => i.instruction_id == id && i.department_id == user.department_id);
+
+                if (instruction == null)
+                {
+                    return NotFound($"Instruction with ID {id} not found");
+                }
+
+                // Check if the instruction can be deleted
+                // You may want to add additional checks, such as whether the instruction has been assigned or passed
+                if (instruction.is_passed_by_everyone)
+                {
+                    return BadRequest("Cannot delete an instruction that has been completed by everyone");
+                }
+
+                // First, delete related file paths
+                var filePaths = await _dbContext.FilePathsForInstructions
+                    .Where(fp => fp.instruction_id == id)
+                    .ToListAsync();
+
+                _dbContext.FilePathsForInstructions.RemoveRange(filePaths);
+                await _dbContext.SaveChangesAsync();
+
+                // Then, delete related instruction statuses
+                var statuses = await _dbContext.InstructionStatuses
+                    .Where(s => s.instruction_id == id)
+                    .ToListAsync();
+
+                // For each status, delete related normative instruction links
+                foreach (var status in statuses)
+                {
+                    var links = await _dbContext.InstructionStatusToNormativeInstrNames
+                        .Where(link => link.instruction_status_id == status.id)
+                        .ToListAsync();
+
+                    _dbContext.InstructionStatusToNormativeInstrNames.RemoveRange(links);
+                }
+
+                await _dbContext.SaveChangesAsync();
+                _dbContext.InstructionStatuses.RemoveRange(statuses);
+                await _dbContext.SaveChangesAsync();
+
+                // Finally, delete the instruction itself
+                _dbContext.Instructions.Remove(instruction);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok("Instruction deleted successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting instruction with ID {id}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        // Add this DTO for instruction updates
+        public class UpdateInstructionDto
+        {
+            [Required]
+            public string CauseOfInstruction { get; set; }
+
+            [Required]
+            public DateTime EndDate { get; set; }
+
+            [Required]
+            public byte TypeOfInstruction { get; set; }
+
+            public List<string> FilePaths { get; set; }
+        }
+
+        #endregion
     }
 }
