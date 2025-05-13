@@ -86,6 +86,18 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddSingleton<ChiefsManager>();
 builder.Services.AddSingleton<JWTTokenValidator>();
 
+// Get JWT settings with validation
+var jwtSecret = builder.Configuration["JwtConfig:Secret"];
+if (string.IsNullOrEmpty(jwtSecret))
+{
+Log.Error("JWT Secret is missing in configuration");
+throw new InvalidOperationException("JWT Secret is not configured. Please add JwtConfig:Secret to your appsettings.json");
+}
+
+var jwtIssuer = builder.Configuration["JwtConfig:Issuer"] ?? "DefaultIssuer";
+var jwtAudience = builder.Configuration["JwtConfig:Audience"] ?? "DefaultAudience";
+
+// Then use these validated settings in your JWT configuration
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -95,10 +107,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["JwtConfig:Issuer"],
-            ValidAudience = builder.Configuration["JwtConfig:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["JwtConfig:Secret"]))
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
         };
 
         // Enable SignalR JWT Authentication
