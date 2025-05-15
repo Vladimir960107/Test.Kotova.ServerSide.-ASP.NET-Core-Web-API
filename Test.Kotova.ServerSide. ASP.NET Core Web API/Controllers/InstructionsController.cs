@@ -676,42 +676,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         /// <summary>
-        /// Sends an instruction to a list of personnel based on names and birthdates.
-        /// </summary>
-        /// <remarks>
-        /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to send a specific instruction 
-        /// to personnel identified by their names and birthdates. The function validates and processes the instruction 
-        /// and creates the corresponding instruction status records.
-        /// </remarks>
-        /// <param name="package">
-        /// The package containing the instruction details and a list of names and birthdates.
-        /// </param>
-        /// <returns>
-        /// Returns an OK response if the instruction is successfully sent and processed. 
-        /// Returns a BadRequest response if there is an error in the package or during processing.
-        /// </returns>
-        /// <response code="200">
-        /// The instruction was successfully sent to the specified personnel.
-        /// </response>
-        /// <response code="400">
-        /// A bad request occurred due to one of the following reasons:
-        /// - The package is null or invalid.
-        /// - An error occurred during instruction processing.
-        /// </response>
-        /// <response code="401">
-        /// Unauthorized - The user is not authenticated or their username claim is missing.
-        /// </response>
-        /// <response code="403">
-        /// Forbidden - The user does not have the required role.
-        /// </response>
-        /// <summary>
         /// Adds a new instruction into the database.
         /// </summary>
         /// <remarks>
         /// This endpoint allows authorized users (Chiefs of Departments or Administrators) to add a new instruction 
-        /// to the database. The instruction details include cause, date range, type, and file paths.
+        /// to the database. The instruction details include cause, end date, and type.
         /// </remarks>
-        /// <param name="request">The instruction details to be added</param>
+        /// <param name="instructionDto">The instruction details to be added</param>
         /// <returns>
         /// Returns the created instruction if successful, or appropriate error responses.
         /// </returns>
@@ -721,11 +692,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="403">The user doesn't have permission to add instructions</response>
         [HttpPost("add-new-instruction-into-db")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] AddInstructionRequest request)
+        public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] InstructionCreateDto instructionDto)
         {
             try
             {
-                if (request == null || request.Instruction == null)
+                if (instructionDto == null)
                 {
                     return BadRequest("Instruction data is missing");
                 }
@@ -751,10 +722,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 // Create a new instruction entity
                 var instruction = new Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models.Instruction
                 {
-                    cause_of_instruction = request.Instruction.CauseOfInstruction,
+                    cause_of_instruction = instructionDto.CauseOfInstruction,
                     begin_date = DateTime.UtcNow, // Always use current time for begin_date
-                    end_date = request.Instruction.EndDate,
-                    type_of_instruction = request.Instruction.TypeOfInstruction,
+                    end_date = instructionDto.EndDate,
+                    type_of_instruction = instructionDto.TypeOfInstruction,
                     is_passed_by_everyone = false, // Always start as not passed
                     is_assigned_to_people = false, // Not assigned to people yet
                     department_id = departmentId
@@ -794,46 +765,21 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                 _dbContext.Instructions.Add(instruction);
                                 await _dbContext.SaveChangesAsync();
 
-                                // Track added file paths
-                                List<string> addedFilePaths = new List<string>();
-
-                                // Add file paths if they exist
-                                if (request.Paths != null && request.Paths.Any())
-                                {
-                                    foreach (var path in request.Paths)
-                                    {
-                                        var filePathEntity = new FilePathForInstruction
-                                        {
-                                            instruction_id = instruction.instruction_id,
-                                            file_path = path,
-                                            instruction_name = instruction.cause_of_instruction
-                                        };
-
-                                        _dbContext.FilePathsForInstructions.Add(filePathEntity);
-                                        addedFilePaths.Add(path);
-                                    }
-
-                                    await _dbContext.SaveChangesAsync();
-                                }
-                                // If there's a path_to_instruction but no paths, add it as a file path
-                                else if (!string.IsNullOrEmpty(request.Instruction.PathToInstruction))
-                                {
-                                    var filePathEntity = new FilePathForInstruction
-                                    {
-                                        instruction_id = instruction.instruction_id,
-                                        file_path = request.Instruction.PathToInstruction,
-                                        instruction_name = instruction.cause_of_instruction
-                                    };
-
-                                    _dbContext.FilePathsForInstructions.Add(filePathEntity);
-                                    addedFilePaths.Add(request.Instruction.PathToInstruction);
-                                    await _dbContext.SaveChangesAsync();
-                                }
-
                                 await transaction.CommitAsync();
 
-                                // Map entity to DTO for response
-                                return MapToDto(instruction, addedFilePaths);
+                                // Map entity to DTO for response - modified to not include paths
+                                return new InstructionResultDto
+                                {
+                                    InstructionId = instruction.instruction_id,
+                                    CauseOfInstruction = instruction.cause_of_instruction,
+                                    BeginDate = instruction.begin_date,
+                                    EndDate = instruction.end_date,
+                                    TypeOfInstruction = instruction.type_of_instruction,
+                                    IsAssignedToPeople = instruction.is_assigned_to_people,
+                                    IsPassedByEveryone = instruction.is_passed_by_everyone,
+                                    // You might want to include the type name if available
+                                    TypeName = await GetInstructionTypeNameAsync(instruction.type_of_instruction)
+                                };
                             }
                             catch (Exception ex)
                             {
@@ -865,6 +811,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 _logger.LogError(ex, "Error adding new instruction");
                 return BadRequest($"An error occurred: {ex.Message}");
             }
+        }
+
+        // Helper method to get instruction type name
+        private async Task<string> GetInstructionTypeNameAsync(byte typeOfInstruction)
+        {
+            var instructionType = await _dbContext.InstructionTypes
+                .FirstOrDefaultAsync(n => n.type_of_instruction == typeOfInstruction);
+
+            return instructionType?.name_of_type_instruction ?? "Unknown";
         }
 
 
