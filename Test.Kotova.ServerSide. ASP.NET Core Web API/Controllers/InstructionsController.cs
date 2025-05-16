@@ -1457,23 +1457,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <summary>
         /// Updates an existing instruction.
         /// </summary>
-        /// <remarks>
-        /// This endpoint allows authorized users to update an existing instruction's details.
-        /// </remarks>
-        /// <param name="id">The ID of the instruction to update</param>
-        /// <param name="instructionDto">The updated instruction data</param>
-        /// <returns>
-        /// The updated instruction if successful.
-        /// </returns>
-        /// <response code="200">The instruction was successfully updated.</response>
-        /// <response code="400">Bad request - The provided data was invalid.</response>
-        /// <response code="401">Unauthorized - The user is not authenticated.</response>
-        /// <response code="403">Forbidden - The user does not have the required role.</response>
-        /// <response code="404">Not Found - The specified instruction was not found.</response>
-        /// <response code="500">Internal server error occurred during update.</response>
         [HttpPut("update-instruction/{id}")]
         [Authorize(Roles = "ChiefOfDepartment, Administrator")]
-        public async Task<IActionResult> UpdateInstruction(int id, [FromBody] UpdateInstructionDto instructionDto)
+        public async Task<IActionResult> UpdateInstruction(int id, [FromBody] InstructionUpdateDto instructionDto)
         {
             if (instructionDto == null)
             {
@@ -1521,53 +1507,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 _dbContext.Instructions.Update(instruction);
                 await _dbContext.SaveChangesAsync();
 
-                // Handle file paths update if needed
-                if (instructionDto.FilePaths != null)
-                {
-                    // Remove existing file paths
-                    var existingPaths = await _dbContext.FilePathsForInstructions
-                        .Where(fp => fp.instruction_id == id)
-                        .ToListAsync();
-
-                    _dbContext.FilePathsForInstructions.RemoveRange(existingPaths);
-                    await _dbContext.SaveChangesAsync();
-
-                    // Add new file paths
-                    foreach (var path in instructionDto.FilePaths)
-                    {
-                        var filePathEntity = new FilePathForInstruction
-                        {
-                            instruction_id = id,
-                            file_path = path,
-                            instruction_name = instruction.cause_of_instruction
-                        };
-
-                        _dbContext.FilePathsForInstructions.Add(filePathEntity);
-                    }
-
-                    await _dbContext.SaveChangesAsync();
-                }
-
                 // Return the updated instruction
-                var updatedInstruction = await _dbContext.Instructions
-                    .Include(i => i.InstructionType)
-                    .Include(i => i.FilePaths)
-                    .FirstOrDefaultAsync(i => i.instruction_id == id);
-
-                var result = new
+                var updatedInstructionDto = new InstructionResultDto
                 {
-                    updatedInstruction.instruction_id,
-                    updatedInstruction.cause_of_instruction,
-                    updatedInstruction.begin_date,
-                    updatedInstruction.end_date,
-                    updatedInstruction.type_of_instruction,
-                    updatedInstruction.is_assigned_to_people,
-                    updatedInstruction.is_passed_by_everyone,
-                    TypeName = updatedInstruction.InstructionType?.name_of_type_instruction,
-                    FilePaths = updatedInstruction.FilePaths.Select(fp => fp.file_path).ToList()
+                    InstructionId = instruction.instruction_id,
+                    CauseOfInstruction = instruction.cause_of_instruction,
+                    BeginDate = instruction.begin_date,
+                    EndDate = instruction.end_date,
+                    TypeOfInstruction = instruction.type_of_instruction,
+                    IsAssignedToPeople = instruction.is_assigned_to_people,
+                    IsPassedByEveryone = instruction.is_passed_by_everyone,
+                    TypeName = await GetInstructionTypeNameAsync(instruction.type_of_instruction)
                 };
 
-                return Ok(result);
+                return Ok(updatedInstructionDto);
             }
             catch (Exception ex)
             {
