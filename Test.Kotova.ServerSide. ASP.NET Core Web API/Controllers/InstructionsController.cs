@@ -159,7 +159,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     InstructionId = s.instruction_id,
                     DepartmentId = s.department_id,
                     Cause = s.Instruction.cause_of_instruction,
-                    BeginDate = s.Instruction.begin_date,
                     EndDate = s.Instruction.end_date,
                     Type = s.Instruction.InstructionType?.name_of_type_instruction,
                     TypeOfInstruction = s.Instruction.type_of_instruction,
@@ -243,10 +242,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     InstructionId = s.instruction_id,
                     DepartmentId = s.department_id,
                     Cause = s.Instruction.cause_of_instruction,
-                    BeginDate = s.Instruction.begin_date,
                     EndDate = s.Instruction.end_date,
                     Type = s.Instruction.InstructionType?.name_of_type_instruction,
                     TypeOfInstruction = s.Instruction.type_of_instruction,
+                    WhenAssigned = s.when_was_sent_to_user,
                     WhenPassed = s.date_when_passed,
                     NormativeInstructions = s.NormativeInstructions.Select(ni => new
                     {
