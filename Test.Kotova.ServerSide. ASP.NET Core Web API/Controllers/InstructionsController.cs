@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+Ôªøusing Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -84,13 +84,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             return typeCode switch
             {
-                0 => "¬‚Ó‰Ì˚È",
-                1 => "¬ÌÂÔÎ‡ÌÓ‚˚È",
-                2 => "œÂ‚Ë˜Ì˚È",
-                3 => "œÓ‚ÚÓÌ˚È",
-                4 => "œÓ‚ÚÓÌ˚È (‰Îˇ ‚Ó‰ËÚÂÎÂÈ)",
-                5 => "÷ÂÎÂ‚ÓÈ",
-                _ => "ÕÂËÁ‚ÂÒÚÌ˚È ÚËÔ"
+                0 => "√Ç√¢√Æ√§√≠√ª√©",
+                1 => "√Ç√≠√•√Ø√´√†√≠√Æ√¢√ª√©",
+                2 => "√è√•√∞√¢√®√∑√≠√ª√©",
+                3 => "√è√Æ√¢√≤√Æ√∞√≠√ª√©",
+                4 => "√è√Æ√¢√≤√Æ√∞√≠√ª√© (√§√´√ø √¢√Æ√§√®√≤√•√´√•√©)",
+                5 => "√ñ√•√´√•√¢√Æ√©",
+                _ => "√ç√•√®√ß√¢√•√±√≤√≠√ª√© √≤√®√Ø"
             };
         }
         #endregion
@@ -98,15 +98,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         #region UserRegion
 
         /// <summary>
-        /// Retrieves not passed instructions for the authenticated user.
+        /// Retrieves not passed instructions for the authenticated user with normative instruction links.
         /// </summary>
         /// <remarks>
         /// This endpoint fetches the user's associated not passed instructions by determining their personnel number 
-        /// and department ID from the database.
+        /// and department ID from the database. It also includes related normative instruction names and URLs.
         /// Requires the user to be authenticated.
         /// </remarks>
         /// <returns>
-        /// Returns a list of instruction data for the user.
+        /// Returns a list of instruction data for the user including normative instructions.
         /// </returns>
         /// <response code="200">
         /// The user's not passed instructions were retrieved successfully.
@@ -145,24 +145,31 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return BadRequest("Personnel ID not found for this user");
                 }
 
-                // Get instruction statuses for the user that are not passed
+                // Get instruction statuses for the user that are not passed with normative instructions
                 var instructionStatuses = await _dbContext.InstructionStatuses
                     .Where(s => s.personnel_id == user.personnel_id && !s.is_instruction_passed)
                     .Include(s => s.Instruction)
-                    .ThenInclude(i => i.FilePaths)
-                    .Include(s => s.Instruction)
-                    .ThenInclude(i => i.InstructionType)
+                        .ThenInclude(i => i.InstructionType)
+                    .Include(s => s.NormativeInstructions)
+                        .ThenInclude(ni => ni.NormativeInstructionName)
                     .ToListAsync();
 
                 var result = instructionStatuses.Select(s => new
                 {
                     InstructionId = s.instruction_id,
+                    DepartmentId = s.department_id,
                     Cause = s.Instruction.cause_of_instruction,
                     BeginDate = s.Instruction.begin_date,
                     EndDate = s.Instruction.end_date,
                     Type = s.Instruction.InstructionType?.name_of_type_instruction,
+                    TypeOfInstruction = s.Instruction.type_of_instruction,
                     WhenAssigned = s.when_was_sent_to_user,
-                    FilePaths = s.Instruction.FilePaths.Select(fp => fp.file_path).ToList()
+                    NormativeInstructions = s.NormativeInstructions.Select(ni => new
+                    {
+                        Id = ni.normative_instruction_name_id,
+                        Name = ni.NormativeInstructionName.normative_instruction_name,
+                        Url = ni.NormativeInstructionName.url
+                    }).ToList()
                 }).ToList();
 
                 return Ok(result);
@@ -175,15 +182,15 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         /// <summary>
-        /// Retrieves passed instructions for the authenticated user.
+        /// Retrieves passed instructions for the authenticated user with normative instruction links.
         /// </summary>
         /// <remarks>
         /// This endpoint fetches the user's associated passed instructions by determining their personnel number 
-        /// and department ID from the database.
+        /// and department ID from the database. It also includes related normative instruction names and URLs.
         /// Requires the user to be authenticated.
         /// </remarks>
         /// <returns>
-        /// Returns a list of instruction data for the user.
+        /// Returns a list of instruction data for the user including normative instructions.
         /// </returns>
         /// <response code="200">
         /// The user's passed instructions were retrieved successfully.
@@ -222,24 +229,31 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return BadRequest("Personnel ID not found for this user");
                 }
 
-                // Get instruction statuses for the user that are passed
+                // Get instruction statuses for the user that are passed with normative instructions
                 var instructionStatuses = await _dbContext.InstructionStatuses
                     .Where(s => s.personnel_id == user.personnel_id && s.is_instruction_passed)
                     .Include(s => s.Instruction)
-                    .ThenInclude(i => i.FilePaths)
-                    .Include(s => s.Instruction)
-                    .ThenInclude(i => i.InstructionType)
+                        .ThenInclude(i => i.InstructionType)
+                    .Include(s => s.NormativeInstructions)
+                        .ThenInclude(ni => ni.NormativeInstructionName)
                     .ToListAsync();
 
                 var result = instructionStatuses.Select(s => new
                 {
                     InstructionId = s.instruction_id,
+                    DepartmentId = s.department_id,
                     Cause = s.Instruction.cause_of_instruction,
                     BeginDate = s.Instruction.begin_date,
                     EndDate = s.Instruction.end_date,
                     Type = s.Instruction.InstructionType?.name_of_type_instruction,
+                    TypeOfInstruction = s.Instruction.type_of_instruction,
                     WhenPassed = s.date_when_passed,
-                    FilePaths = s.Instruction.FilePaths.Select(fp => fp.file_path).ToList()
+                    NormativeInstructions = s.NormativeInstructions.Select(ni => new
+                    {
+                        Id = ni.normative_instruction_name_id,
+                        Name = ni.NormativeInstructionName.normative_instruction_name,
+                        Url = ni.NormativeInstructionName.url
+                    }).ToList()
                 }).ToList();
 
                 return Ok(result);
@@ -361,7 +375,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpGet("greeting")]
         public IActionResult GetGreeting()
         {
-            return Ok("œË‚ÂÚ, ÏË!");
+            return Ok("√è√∞√®√¢√•√≤, √¨√®√∞!");
         }
 
         [HttpGet("sync-instructions-with-db")]
@@ -439,7 +453,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 var employees = await _dbContext.EmployeesByDepartment
                     .Where(e =>
                         e.department_id == user.department_id &&
-                        e.job_position != "Õ‡˜‡Î¸ÌËÍ ÓÚ‰ÂÎ‡" &&
+                        e.job_position != "√ç√†√∑√†√´√º√≠√®√™ √Æ√≤√§√•√´√†" &&
                         e.personnel_id != user.personnel_id)
                     .Select(e => new
                     {
@@ -537,7 +551,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
+        /*private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
         {
             // Create an execution strategy
             var strategy = _dbContext.Database.CreateExecutionStrategy();
@@ -669,6 +683,231 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                 _logger.LogError(rollbackEx, "Error rolling back transaction");
                             }
                         }
+                        throw; // Rethrow to be handled by the caller
+                    }
+                }
+            });
+        }*/
+        private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser) // This function is for debugging.
+        {
+            // Add detailed logging for the entire process
+            _logger.LogInformation($"===== DEBUG DIAGNOSTICS START =====");
+            _logger.LogInformation($"Received instruction package: Cause='{package.InstructionCause}'");
+            _logger.LogInformation($"Number of employees in package: {package.NamesAndBirthDates?.Count ?? 0}");
+
+            if (package.NormativeInstructionNameIds != null && package.NormativeInstructionNameIds.Any())
+            {
+                _logger.LogInformation($"Normative instruction IDs in package: {string.Join(", ", package.NormativeInstructionNameIds)}");
+            }
+            else
+            {
+                _logger.LogWarning($"‚ö†Ô∏è No normative instruction IDs in package or empty list!");
+            }
+
+            // Create an execution strategy
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+            // Execute the transaction with the strategy and return a result
+            return await strategy.ExecuteAsync<string>(async () =>
+            {
+                // Start transaction inside the execution strategy
+                using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+                {
+                    try
+                    {
+                        _logger.LogInformation($"üîç Searching for instruction with cause: '{package.InstructionCause}'");
+
+                        // Find the instruction by its cause
+                        var instruction = await _dbContext.Instructions
+                            .FirstOrDefaultAsync(i => i.cause_of_instruction == package.InstructionCause);
+
+                        if (instruction == null)
+                        {
+                            _logger.LogError($"‚ùå Instruction with cause '{package.InstructionCause}' not found.");
+                            throw new InvalidOperationException($"Instruction with cause '{package.InstructionCause}' not found.");
+                        }
+
+                        _logger.LogInformation($"‚úÖ Found instruction ID={instruction.instruction_id}, Cause='{instruction.cause_of_instruction}'");
+
+                        // Mark the instruction as assigned to people
+                        instruction.is_assigned_to_people = true;
+                        _dbContext.Instructions.Update(instruction);
+                        await _dbContext.SaveChangesAsync();
+                        _logger.LogInformation($"‚úÖ Instruction marked as assigned to people");
+
+                        // Find personnel IDs based on names and birthdates
+                        var namesList = package.NamesAndBirthDates.Select(t => t.Item1).ToList();
+                        var birthdatesList = package.NamesAndBirthDates
+                            .Select(t => DateTime.ParseExact(t.Item2, "yyyy-MM-dd", CultureInfo.InvariantCulture))
+                            .ToList();
+
+                        _logger.LogInformation($"üîç Searching for personnel based on {namesList.Count} names and birthdates");
+
+                        // Log details of names and birthdates for debugging
+                        for (int i = 0; i < namesList.Count; i++)
+                        {
+                            _logger.LogInformation($"  -> Looking for: {namesList[i]}, DOB: {package.NamesAndBirthDates[i].Item2}");
+                        }
+
+                        // Query for matching personnel records with NULL handling
+                        var query = _dbContext.Personnel
+                            .Join(_dbContext.EmployeesByDepartment,
+                                p => p.personnel_id,
+                                e => e.personnel_id,
+                                (p, e) => new {
+                                    Personnel = p,
+                                    Employee = e
+                                })
+                            .Where(x => namesList.Contains(x.Employee.full_name) &&
+                                   birthdatesList.Contains(x.Employee.birth_date) &&
+                                   x.Employee.department_id == currentUser.department_id);
+
+                        // Execute query and handle results carefully
+                        var personnelRecords = await query.ToListAsync();
+                        _logger.LogInformation($"‚úÖ Found {personnelRecords.Count} personnel records");
+
+                        var personnel = personnelRecords
+                            .Select(x => x.Personnel)
+                            .Where(p => p != null)  // Filter out any null records
+                            .ToList();
+
+                        if (!personnel.Any())
+                        {
+                            _logger.LogError($"‚ùå No matching personnel found for the provided names and birthdates.");
+                            throw new InvalidOperationException("No matching personnel found for the provided names and birthdates.");
+                        }
+
+                        // Log found personnel for diagnostics
+                        foreach (var person in personnel)
+                        {
+                            _logger.LogInformation($"  -> Found personnel ID={person.personnel_id}, Number={person.personnel_number}");
+                        }
+
+                        // Create instruction status records for each personnel
+                        int assignmentCount = 0;
+                        int normativeLinksCreated = 0;
+                        foreach (var person in personnel)
+                        {
+                            // Safety check for null IDs
+                            if (person.personnel_id <= 0 || currentUser.department_id <= 0 || instruction.instruction_id <= 0)
+                            {
+                                _logger.LogWarning($"‚ö†Ô∏è Skipping person with invalid IDs: Person={person.personnel_id}, Dept={currentUser.department_id}, Instr={instruction.instruction_id}");
+                                continue; // Skip invalid records
+                            }
+
+                            var existingStatus = await _dbContext.InstructionStatuses
+                                .FirstOrDefaultAsync(s => s.instruction_id == instruction.instruction_id &&
+                                                         s.personnel_id == person.personnel_id);
+
+                            if (existingStatus == null)
+                            {
+                                _logger.LogInformation($"üìù Creating new instruction status for personnel ID={person.personnel_id}");
+
+                                var instructionStatus = new InstructionStatus
+                                {
+                                    instruction_id = instruction.instruction_id,
+                                    personnel_id = person.personnel_id,
+                                    department_id = currentUser.department_id,
+                                    is_instruction_passed = false,
+                                    when_was_sent_to_user = DateTime.Now,
+                                    when_was_sent_to_user_UTC = DateTime.UtcNow,
+                                    was_signed_by_personnel_id = currentUser.personnel_id
+                                };
+
+                                _dbContext.InstructionStatuses.Add(instructionStatus);
+                                await _dbContext.SaveChangesAsync(); // Save to get the ID
+                                _logger.LogInformation($"‚úÖ Created instruction status ID={instructionStatus.id}");
+
+                                // If normative instruction IDs are provided, add them to the junction table
+                                if (package.NormativeInstructionNameIds != null && package.NormativeInstructionNameIds.Any())
+                                {
+                                    _logger.LogInformation($"üìù Adding {package.NormativeInstructionNameIds.Count} normative instructions");
+
+                                    foreach (var normativeId in package.NormativeInstructionNameIds)
+                                    {
+                                        try
+                                        {
+                                            // Check if normative instruction exists
+                                            var normativeExists = await _dbContext.NormativeInstructionNames
+                                                .AnyAsync(n => n.id == normativeId);
+
+                                            if (!normativeExists)
+                                            {
+                                                _logger.LogWarning($"‚ö†Ô∏è Normative instruction ID={normativeId} not found in database!");
+                                                continue;
+                                            }
+
+                                            _logger.LogInformation($"  -> Linking: status ID={instructionStatus.id} with normative instruction ID={normativeId}");
+
+                                            var junction = new InstructionStatusToNormativeInstrName
+                                            {
+                                                instruction_status_id = instructionStatus.id,
+                                                normative_instruction_name_id = normativeId
+                                            };
+
+                                            _dbContext.InstructionStatusToNormativeInstrNames.Add(junction);
+                                            normativeLinksCreated++;
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogError($"‚ùå Error adding normative instruction ID={normativeId}: {ex.Message}");
+                                        }
+                                    }
+
+                                    // Save changes after each status to ensure links are saved
+                                    await _dbContext.SaveChangesAsync();
+                                    _logger.LogInformation($"‚úÖ Saved normative links for status ID={instructionStatus.id}");
+                                }
+                                else
+                                {
+                                    _logger.LogWarning($"‚ö†Ô∏è No normative instructions to add for status ID={instructionStatus.id}");
+                                }
+
+                                assignmentCount++;
+                            }
+                            else
+                            {
+                                _logger.LogInformation($"‚ÑπÔ∏è Instruction status already exists for personnel ID={person.personnel_id}");
+                            }
+                        }
+
+                        if (assignmentCount > 0)
+                        {
+                            _logger.LogInformation($"üìä Total: created {assignmentCount} instruction statuses and {normativeLinksCreated} normative links");
+                            await _dbContext.SaveChangesAsync();
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"‚ö†Ô∏è No new instruction statuses created");
+                        }
+
+                        await transaction.CommitAsync();
+                        _logger.LogInformation($"‚úÖ Transaction successfully committed");
+                        _logger.LogInformation($"===== DEBUG DIAGNOSTICS END =====");
+
+                        // Result will be the count of personnel that were assigned
+                        return $"Instruction '{package.InstructionCause}' has been assigned to {assignmentCount} people with {normativeLinksCreated} normative instruction links.";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"‚ùå ERROR in ProcessInstructionAssignment: {ex.Message}");
+                        _logger.LogError($"‚ùå StackTrace: {ex.StackTrace}");
+
+                        // Only roll back if the transaction is still active
+                        if (transaction.GetDbTransaction().Connection != null)
+                        {
+                            try
+                            {
+                                await transaction.RollbackAsync();
+                                _logger.LogInformation($"‚úÖ Transaction successfully rolled back");
+                            }
+                            catch (Exception rollbackEx)
+                            {
+                                _logger.LogError(rollbackEx, "‚ùå Error rolling back transaction");
+                            }
+                        }
+
+                        _logger.LogInformation($"===== DEBUG DIAGNOSTICS END WITH ERROR =====");
                         throw; // Rethrow to be handled by the caller
                     }
                 }
