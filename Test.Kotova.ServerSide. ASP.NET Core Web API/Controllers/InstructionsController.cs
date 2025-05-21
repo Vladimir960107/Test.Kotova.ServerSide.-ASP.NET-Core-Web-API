@@ -913,6 +913,302 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             });
         }
 
+
+        /// <summary>
+        /// Gets compliance data for instructions, showing who has passed each instruction.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint returns instruction compliance information with detailed employee data,
+        /// including who assigned the instruction and which normative documents were used.
+        /// </remarks>
+        /// <returns>
+        /// A list of instructions with detailed employee compliance data.
+        /// </returns>
+        [HttpGet("get-instructions-with-compliance-data")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetInstructionsWithComplianceData()
+        {
+            try
+            {
+                // Get current user's information
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+
+                // Get all instructions for this department
+                var instructions = await _dbContext.Instructions
+                    .Where(i => i.department_id == departmentId)
+                    .Include(i => i.InstructionType)
+                    .OrderByDescending(i => i.begin_date)
+                    .ToListAsync();
+
+                // Create result list with all required data
+                var result = new List<object>();
+
+                // For each instruction, get the employee compliance data
+                foreach (var instruction in instructions)
+                {
+                    // Get all instruction statuses for this instruction
+                    var statuses = await _dbContext.InstructionStatuses
+                        .Where(s => s.instruction_id == instruction.instruction_id && s.department_id == departmentId)
+                        .Include(s => s.Personnel)
+                        .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
+                        .ToListAsync();
+
+                    // Create employee data
+                    var employeeData = new List<object>();
+
+                    foreach (var status in statuses)
+                    {
+                        // Get employee info
+                        var employee = status.Personnel.EmployeesByDepartment
+                            .FirstOrDefault(e => e.department_id == departmentId);
+
+                        if (employee != null)
+                        {
+                            // Get normative instruction names for this status
+                            var normativeInstructions = await _dbContext.InstructionStatusToNormativeInstrNames
+                                .Where(link => link.instruction_status_id == status.id)
+                                .Include(link => link.NormativeInstructionName)
+                                .Select(link => link.NormativeInstructionName.normative_instruction_name)
+                                .ToListAsync();
+
+                            // Get the assigner's name and job position (who assigned the instruction)
+                            string assignerInfo = "Неизвестно";
+                            if (status.was_signed_by_personnel_id > 0)
+                            {
+                                var assigner = await _dbContext.Personnel
+                                    .Where(p => p.personnel_id == status.was_signed_by_personnel_id)
+                                    .Include(p => p.EmployeesByDepartment)
+                                    .FirstOrDefaultAsync();
+
+                                if (assigner != null)
+                                {
+                                    var assignerEmployee = assigner.EmployeesByDepartment
+                                        .FirstOrDefault(e => e.department_id == departmentId);
+
+                                    if (assignerEmployee != null)
+                                    {
+                                        // Combine name and job position
+                                        assignerInfo = $"{assignerEmployee.full_name} {assignerEmployee.job_position}";
+                                    }
+                                }
+                            }
+
+                            employeeData.Add(new
+                            {
+                                // Employee information
+                                FullName = employee.full_name,
+                                Position = employee.job_position,
+                                BirthDate = employee.birth_date,
+
+                                // Instruction status information
+                                HasPassed = status.is_instruction_passed,
+                                DatePassed = status.date_when_passed,
+                                DateAssigned = status.when_was_sent_to_user,
+
+                                // Assigner information
+                                AssignedBy = assignerInfo,
+
+                                // Normative instruction names
+                                NormativeDocuments = normativeInstructions
+                            });
+                        }
+                    }
+
+                    // Add to result list
+                    result.Add(new
+                    {
+                        // Instruction information
+                        InstructionId = instruction.instruction_id,
+                        CauseOfInstruction = instruction.cause_of_instruction,
+                        BeginDate = instruction.begin_date,
+                        EndDate = instruction.end_date,
+                        TypeOfInstruction = instruction.type_of_instruction,
+                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? GetInstructionTypeName(instruction.type_of_instruction),
+                        IsAssignedToPeople = instruction.is_assigned_to_people,
+                        IsPassedByEveryone = instruction.is_passed_by_everyone,
+
+                        // Employee data with compliance status
+                        EmployeeData = employeeData
+                    });
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving instruction compliance data");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Gets a filtered report of compliance data for a specific instruction.
+        /// </summary>
+        /// <remarks>
+        /// Returns chronologically ordered compliance data for a specific instruction,
+        /// with employees who passed listed first (sorted by date), followed by those who didn't pass.
+        /// </remarks>
+        /// <param name="instructionId">The ID of the instruction to report on</param>
+        /// <returns>A report with sorted employee compliance data</returns>
+        [HttpGet("get-instruction-compliance-report/{instructionId}")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetInstructionComplianceReport(int instructionId)
+        {
+            try
+            {
+                // Get current user's information
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+
+                // Get the specific instruction
+                var instruction = await _dbContext.Instructions
+                    .Where(i => i.instruction_id == instructionId && i.department_id == departmentId)
+                    .Include(i => i.InstructionType)
+                    .FirstOrDefaultAsync();
+
+                if (instruction == null)
+                {
+                    return NotFound($"Instruction with ID {instructionId} not found");
+                }
+
+                // Get all instruction statuses for this instruction
+                var statuses = await _dbContext.InstructionStatuses
+                    .Where(s => s.instruction_id == instructionId && s.department_id == departmentId)
+                    .Include(s => s.Personnel)
+                    .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
+                    .ToListAsync();
+
+                // Create employee data
+                var employeeData = new List<object>();
+
+                foreach (var status in statuses)
+                {
+                    // Get employee info
+                    var employee = status.Personnel.EmployeesByDepartment
+                        .FirstOrDefault(e => e.department_id == departmentId);
+
+                    if (employee != null)
+                    {
+                        // Get normative instruction names for this status
+                        var normativeInstructions = await _dbContext.InstructionStatusToNormativeInstrNames
+                            .Where(link => link.instruction_status_id == status.id)
+                            .Include(link => link.NormativeInstructionName)
+                            .Select(link => link.NormativeInstructionName.normative_instruction_name)
+                            .ToListAsync();
+
+                        // Get the assigner's name and job position
+                        string assignerInfo = "Неизвестно";
+                        if (status.was_signed_by_personnel_id > 0)
+                        {
+                            var assigner = await _dbContext.Personnel
+                                .Where(p => p.personnel_id == status.was_signed_by_personnel_id)
+                                .Include(p => p.EmployeesByDepartment)
+                                .FirstOrDefaultAsync();
+
+                            if (assigner != null)
+                            {
+                                var assignerEmployee = assigner.EmployeesByDepartment
+                                    .FirstOrDefault(e => e.department_id == departmentId);
+
+                                if (assignerEmployee != null)
+                                {
+                                    // Combine name and job position
+                                    assignerInfo = $"{assignerEmployee.full_name} {assignerEmployee.job_position}";
+                                }
+                            }
+                        }
+
+                        employeeData.Add(new
+                        {
+                            // Employee information
+                            FullName = employee.full_name,
+                            Position = employee.job_position,
+                            BirthDate = employee.birth_date,
+
+                            // Instruction status information
+                            HasPassed = status.is_instruction_passed,
+                            DatePassed = status.date_when_passed,
+                            DateAssigned = status.when_was_sent_to_user,
+
+                            // Assigner information
+                            AssignedBy = assignerInfo,
+
+                            // Normative instruction names
+                            NormativeDocuments = normativeInstructions
+                        });
+                    }
+                }
+
+                // Sort the employee data:
+                // 1. People who passed first (sorted by date, earliest first)
+                // 2. People who haven't passed (sorted by name)
+                var sortedEmployeeData = employeeData
+                    .OrderBy(e => (bool)((dynamic)e).HasPassed ? 0 : 1)
+                    .ThenBy(e => ((dynamic)e).HasPassed ? ((dynamic)e).DatePassed : null)
+                    .ThenBy(e => ((dynamic)e).FullName)
+                    .ToList();
+
+                // Create the final report
+                var report = new
+                {
+                    // Instruction information
+                    InstructionId = instruction.instruction_id,
+                    CauseOfInstruction = instruction.cause_of_instruction,
+                    BeginDate = instruction.begin_date,
+                    EndDate = instruction.end_date,
+                    TypeOfInstruction = instruction.type_of_instruction,
+                    TypeName = instruction.InstructionType?.name_of_type_instruction ?? GetInstructionTypeName(instruction.type_of_instruction),
+
+                    // Statistics
+                    TotalEmployees = sortedEmployeeData.Count,
+                    PassedCount = sortedEmployeeData.Count(e => (bool)((dynamic)e).HasPassed),
+
+                    // Sorted employee data
+                    EmployeeData = sortedEmployeeData
+                };
+
+                return Ok(report);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error retrieving compliance report for instruction {instructionId}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+
+
         /// <summary>
         /// Adds a new instruction into the database.
         /// </summary>
@@ -1593,7 +1889,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 // Get all instructions for the department
                 var instructions = await _dbContext.Instructions
-                    .Where(i => i.department_id == user.department_id)
+                    .Where(i => i.department_id == user.department_id && !i.is_assigned_to_people)
                     .Include(i => i.InstructionType)
                     .Include(i => i.FilePaths)
                     .ToListAsync();
@@ -1859,6 +2155,254 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
+
+
+        //FOR CHIEF
+        /// <summary>
+        /// Retrieves not passed instructions for the authenticated chief's department.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows chiefs of departments to view instructions in their department
+        /// that have not been passed by all employees, including the status of each employee.
+        /// Requires the user to be authenticated and have the ChiefOfDepartment or Administrator role.
+        /// </remarks>
+        /// <returns>
+        /// Returns a list of instructions with the status of each employee for the chief's department.
+        /// </returns>
+        /// <response code="200">
+        /// The not passed instructions were successfully retrieved.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to missing user information.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred during the retrieval process.
+        /// </response>
+        [HttpGet("get-not-passed-instructions-for-chief")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetNotPassedInstructionsForChief()
+        {
+            try
+            {
+                // Get user ID from claims
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+
+                // Get instructions that are not marked as passed by everyone for this department
+                var instructions = await _dbContext.Instructions
+                    .Where(i => i.department_id == departmentId && !i.is_passed_by_everyone)
+                    .Include(i => i.InstructionType)
+                    .ToListAsync();
+
+                if (!instructions.Any())
+                {
+                    return Ok(new List<InstructionForChiefDto>());
+                }
+
+                var result = new List<InstructionForChiefDto>();
+
+                foreach (var instruction in instructions)
+                {
+                    // Get all statuses for this instruction across all personnel in the department
+                    var statuses = await _dbContext.InstructionStatuses
+                        .Where(s => s.instruction_id == instruction.instruction_id && s.department_id == departmentId)
+                        .Include(s => s.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
+                        .ToListAsync();
+
+                    if (!statuses.Any())
+                        continue;
+
+                    var instructionForChief = new InstructionForChiefDto
+                    {
+                        InstructionId = instruction.instruction_id,
+                        BeginDate = instruction.begin_date,
+                        EndDate = instruction.end_date,
+                        CauseOfInstruction = instruction.cause_of_instruction,
+                        TypeOfInstruction = instruction.InstructionType?.name_of_type_instruction ?? "Unknown",
+                        Persons = new List<PersonStatusDto>()
+                    };
+
+                    foreach (var status in statuses)
+                    {
+                        // Find employee details for this personnel in this department
+                        var employee = status.Personnel.EmployeesByDepartment.FirstOrDefault();
+                        if (employee == null)
+                            continue;
+
+                        instructionForChief.Persons.Add(new PersonStatusDto
+                        {
+                            PersonnelNumber = status.Personnel.personnel_number,
+                            PersonName = employee.full_name,
+                            Passed = status.is_instruction_passed
+                        });
+                    }
+
+                    result.Add(instructionForChief);
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving not passed instructions for chief");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+
+
+        /// <summary>
+        /// Retrieves passed instructions for the authenticated chief's department.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows chiefs of departments to view instructions in their department
+        /// that have been passed by at least one employee, including the status of each employee.
+        /// Requires the user to be authenticated and have the ChiefOfDepartment or Administrator role.
+        /// </remarks>
+        /// <returns>
+        /// Returns a list of instructions with the status of each employee for the chief's department.
+        /// </returns>
+        /// <response code="200">
+        /// The passed instructions were successfully retrieved.
+        /// </response>
+        /// <response code="400">
+        /// A bad request occurred due to missing user information.
+        /// </response>
+        /// <response code="401">
+        /// Unauthorized - The user is not authenticated.
+        /// </response>
+        /// <response code="403">
+        /// Forbidden - The user does not have the required role.
+        /// </response>
+        /// <response code="500">
+        /// Internal server error occurred during the retrieval process.
+        /// </response>
+        [HttpGet("get-passed-instructions-for-chief")]
+        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        public async Task<IActionResult> GetPassedInstructionsForChief()
+        {
+            try
+            {
+                // Get user ID from claims
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+
+                // Find instructions where at least one person has passed it
+                var instructionIdsWithPassedStatus = await _dbContext.InstructionStatuses
+                    .Where(s => s.department_id == departmentId && s.is_instruction_passed)
+                    .Select(s => s.instruction_id)
+                    .Distinct()
+                    .ToListAsync();
+
+                if (!instructionIdsWithPassedStatus.Any())
+                {
+                    return Ok(new List<InstructionForChiefDto>());
+                }
+
+                // Get the instructions with those IDs
+                var instructions = await _dbContext.Instructions
+                    .Where(i => instructionIdsWithPassedStatus.Contains(i.instruction_id) && i.department_id == departmentId)
+                    .Include(i => i.InstructionType)
+                    .ToListAsync();
+
+                var result = new List<InstructionForChiefDto>();
+
+                foreach (var instruction in instructions)
+                {
+                    // Get all statuses for this instruction across all personnel in the department
+                    var statuses = await _dbContext.InstructionStatuses
+                        .Where(s => s.instruction_id == instruction.instruction_id && s.department_id == departmentId)
+                        .Include(s => s.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
+                        .ToListAsync();
+
+                    if (!statuses.Any())
+                        continue;
+
+                    var instructionForChief = new InstructionForChiefDto
+                    {
+                        InstructionId = instruction.instruction_id,
+                        BeginDate = instruction.begin_date,
+                        EndDate = instruction.end_date,
+                        CauseOfInstruction = instruction.cause_of_instruction,
+                        TypeOfInstruction = instruction.InstructionType?.name_of_type_instruction ?? "Unknown",
+                        IsPassedByEveryone = instruction.is_passed_by_everyone,
+                        Persons = new List<PersonStatusDto>()
+                    };
+
+                    foreach (var status in statuses)
+                    {
+                        // Find employee details for this personnel in this department
+                        var employee = status.Personnel.EmployeesByDepartment.FirstOrDefault();
+                        if (employee == null)
+                            continue;
+
+                        instructionForChief.Persons.Add(new PersonStatusDto
+                        {
+                            PersonnelNumber = status.Personnel.personnel_number,
+                            PersonName = employee.full_name,
+                            Passed = status.is_instruction_passed,
+                            DatePassed = status.date_when_passed
+                        });
+                    }
+
+                    // Calculate passed percentage
+                    int totalPersons = instructionForChief.Persons.Count;
+                    int passedPersons = instructionForChief.Persons.Count(p => p.Passed);
+                    instructionForChief.PassedPercentage = totalPersons > 0 ? (double)passedPersons / totalPersons * 100 : 0;
+
+                    result.Add(instructionForChief);
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving passed instructions for chief");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+
+
+
 
         // Add this DTO for instruction updates
         public class UpdateInstructionDto
