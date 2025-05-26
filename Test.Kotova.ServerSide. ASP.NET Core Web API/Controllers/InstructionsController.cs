@@ -63,7 +63,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         // Helper method to map from entity to DTO
-        private InstructionResultDto MapToDto(Models.Instruction instruction, List<string> filePaths)
+        private async Task<InstructionResultDto> MapToDto(Models.Instruction instruction, List<string> filePaths)
         {
             return new InstructionResultDto
             {
@@ -75,26 +75,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 IsAssignedToPeople = instruction.is_assigned_to_people,
                 IsPassedByEveryone = instruction.is_passed_by_everyone,
                 FilePaths = filePaths ?? new List<string>(),
-                TypeName = GetInstructionTypeName(instruction.type_of_instruction)
+                TypeName = await GetInstructionTypeNameAsync(instruction.type_of_instruction)
             };
         }
-
-        // Helper method to get the instruction type name
-        private string GetInstructionTypeName(byte typeCode)
-        {
-            return typeCode switch
-            {
-                0 => "Ââîäíûé",
-                1 => "Âíåïëàíîâûé",
-                2 => "Ïåðâè÷íûé",
-                3 => "Ïîâòîðíûé",
-                4 => "Ïîâòîðíûé (äëÿ âîäèòåëåé)",
-                5 => "Öåëåâîé",
-                _ => "Íåèçâåñòíûé òèï"
-            };
-        }
-        #endregion
-
         #region UserRegion
 
         /// <summary>
@@ -374,11 +357,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpGet("greeting")]
         public IActionResult GetGreeting()
         {
-            return Ok("Ïðèâåò, ìèð!");
+            return Ok("Связь с сервером есть!");
         }
 
         [HttpGet("sync-instructions-with-db")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> SyncInstructionsWithDB()
         {
             try
@@ -426,7 +409,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         [HttpGet("sync-names-with-db")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> SyncNamesWithDB()
         {
             try
@@ -500,7 +483,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Forbidden - The user does not have the required role.
         /// </response>
         [HttpPost("send-instruction-to-names")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> SendInstructionToNames([FromBody] InstructionPackage package)
         {
             try
@@ -516,15 +499,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
 
                 // Get user information
-                var username = User.FindFirst(ClaimTypes.Name)?.Value;
-                if (string.IsNullOrEmpty(username))
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
                 {
-                    return Unauthorized("Username claim not found.");
+                    return BadRequest("Invalid user ID");
                 }
 
                 var user = await _dbContext.Users
                     .Include(u => u.Department)
-                    .FirstOrDefaultAsync(u => u.username == username);
+                    .Include(u => u.Role)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
 
                 if (user == null)
                 {
@@ -550,7 +534,73 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        /*private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
+        /// <summary>
+        /// Validates that the current user has permission to assign instructions to the specified personnel
+        /// </summary>
+        /// <param name="currentUser">The user attempting to assign the instruction</param>
+        /// <param name="personnelIds">List of personnel IDs to validate</param>
+        /// <param name="instructionType">Type of instruction being assigned</param>
+        /// <returns>Validation result with success status and error message if applicable</returns>
+        private async Task<(bool IsValid, string ErrorMessage)> ValidateInstructionAssignmentPermissions(
+            User currentUser,
+            List<int> personnelIds,
+            byte instructionType)
+        {
+            try
+            {
+                // Get current user's role
+                var currentUserRole = currentUser.Role?.role_type ?? "";
+
+                // Get allowed roles for assignment
+                var allowedRoles = GetAllowedRolesForAssignment(currentUserRole);
+
+                if (allowedRoles.Count == 0)
+                {
+                    return (false, "У вас нет прав для назначения инструктажей.");
+                }
+
+                // Get the roles of all target personnel
+                var targetPersonnelRoles = await (from personnel in _dbContext.Personnel
+                                                  join userEntity in _dbContext.Users on personnel.personnel_id equals userEntity.personnel_id into userGroup
+                                                  from userEntity in userGroup.DefaultIfEmpty()
+                                                  join role in _dbContext.Roles on userEntity.user_role_id equals role.role_id into roleGroup
+                                                  from role in roleGroup.DefaultIfEmpty()
+                                                  join emp in _dbContext.EmployeesByDepartment on personnel.personnel_id equals emp.personnel_id
+                                                  where personnelIds.Contains(personnel.personnel_id)
+                                                  select new
+                                                  {
+                                                      PersonnelId = personnel.personnel_id,
+                                                      Role = role != null ? role.role_type : "User",
+                                                      FullName = emp.full_name
+                                                  }).ToListAsync();
+
+                // Validate each target person's role
+                foreach (var targetPerson in targetPersonnelRoles)
+                {
+                    // Check if current user can assign to this role
+                    if (!allowedRoles.Contains(targetPerson.Role))
+                    {
+                        return (false, $"У вас нет прав назначать инструктажи пользователю {targetPerson.FullName} (роль: {GetRoleDisplayName(targetPerson.Role)}).");
+                    }
+
+                    /*// Check instruction type restrictions
+                    if ((instructionType == 0 || instructionType == 1) &&
+                        (targetPerson.Role.ToLower().Contains("deputy") || targetPerson.Role.ToLower().Contains("заместитель")))
+                    {
+                        return (false, $"Данный тип инструктажа не может быть назначен заместителю {targetPerson.FullName}.");
+                    }*/ // TODO: THIS SEEMS OBSOLETE, CAUSE WE CAN ASSIGN TO DEPUTE THE INSTRUCTIONS OF TYPE 1 and 0
+                }
+
+                return (true, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating instruction assignment permissions");
+                return (false, "Ошибка при проверке прав доступа.");
+            }
+        }
+
+        private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser)
         {
             // Create an execution strategy
             var strategy = _dbContext.Database.CreateExecutionStrategy();
@@ -572,11 +622,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             throw new InvalidOperationException($"Instruction with cause '{package.InstructionCause}' not found.");
                         }
 
-                        // Mark the instruction as assigned to people
-                        instruction.is_assigned_to_people = true;
-                        _dbContext.Instructions.Update(instruction);
-                        await _dbContext.SaveChangesAsync();
-
                         // Find personnel IDs based on names and birthdates
                         var namesList = package.NamesAndBirthDates.Select(t => t.Item1).ToList();
                         var birthdatesList = package.NamesAndBirthDates
@@ -588,7 +633,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             .Join(_dbContext.EmployeesByDepartment,
                                 p => p.personnel_id,
                                 e => e.personnel_id,
-                                (p, e) => new {
+                                (p, e) => new
+                                {
                                     Personnel = p,
                                     Employee = e
                                 })
@@ -608,6 +654,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         {
                             throw new InvalidOperationException("No matching personnel found for the provided names and birthdates.");
                         }
+
+                        // Validate assignment permissions BEFORE making any changes
+                        var personnelIds = personnel.Select(p => p.personnel_id).ToList();
+                        var validationResult = await ValidateInstructionAssignmentPermissions(
+                            currentUser,
+                            personnelIds,
+                            instruction.type_of_instruction);
+
+                        if (!validationResult.IsValid)
+                        {
+                            throw new UnauthorizedAccessException(validationResult.ErrorMessage);
+                        }
+
+                        // Mark the instruction as assigned to people ONLY after validation passes
+                        instruction.is_assigned_to_people = true;
+                        _dbContext.Instructions.Update(instruction);
+                        await _dbContext.SaveChangesAsync();
 
                         // Create instruction status records for each personnel
                         int assignmentCount = 0;
@@ -644,6 +707,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                 {
                                     foreach (var normativeId in package.NormativeInstructionNameIds)
                                     {
+                                        // Optional: Validate that the normative instruction exists
+                                        var normativeExists = await _dbContext.NormativeInstructionNames
+                                            .AnyAsync(n => n.id == normativeId);
+
+                                        if (!normativeExists)
+                                        {
+                                            _logger.LogWarning($"Normative instruction with ID {normativeId} not found, skipping.");
+                                            continue;
+                                        }
+
                                         var junction = new InstructionStatusToNormativeInstrName
                                         {
                                             instruction_status_id = instructionStatus.id,
@@ -686,8 +759,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     }
                 }
             });
-        }*/
-        private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser) // This function is for debugging.
+        }
+        /*private async Task<string> ProcessInstructionAssignment(InstructionPackage package, User currentUser) // This function is for debugging.
         {
             // Add detailed logging for the entire process
             _logger.LogInformation($"===== DEBUG DIAGNOSTICS START =====");
@@ -753,7 +826,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             .Join(_dbContext.EmployeesByDepartment,
                                 p => p.personnel_id,
                                 e => e.personnel_id,
-                                (p, e) => new {
+                                (p, e) => new
+                                {
                                     Personnel = p,
                                     Employee = e
                                 })
@@ -911,7 +985,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     }
                 }
             });
-        }
+        }*/
 
 
         /// <summary>
@@ -925,7 +999,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// A list of instructions with detailed employee compliance data.
         /// </returns>
         [HttpGet("get-instructions-with-compliance-data")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetInstructionsWithComplianceData()
         {
             try
@@ -1039,7 +1113,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         BeginDate = instruction.begin_date,
                         EndDate = instruction.end_date,
                         TypeOfInstruction = instruction.type_of_instruction,
-                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? GetInstructionTypeName(instruction.type_of_instruction),
+                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? await GetInstructionTypeNameAsync(instruction.type_of_instruction),
                         IsAssignedToPeople = instruction.is_assigned_to_people,
                         IsPassedByEveryone = instruction.is_passed_by_everyone,
 
@@ -1067,7 +1141,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <param name="instructionId">The ID of the instruction to report on</param>
         /// <returns>A report with sorted employee compliance data</returns>
         [HttpGet("get-instruction-compliance-report/{instructionId}")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetInstructionComplianceReport(int instructionId)
         {
             try
@@ -1188,7 +1262,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     BeginDate = instruction.begin_date,
                     EndDate = instruction.end_date,
                     TypeOfInstruction = instruction.type_of_instruction,
-                    TypeName = instruction.InstructionType?.name_of_type_instruction ?? GetInstructionTypeName(instruction.type_of_instruction),
+                    TypeName = instruction.InstructionType?.name_of_type_instruction ?? await GetInstructionTypeNameAsync(instruction.type_of_instruction),
 
                     // Statistics
                     TotalEmployees = sortedEmployeeData.Count,
@@ -1207,7 +1281,327 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        // FIXED: In InstructionsController.cs, replace the GetEmployeesWithRoles method with this version
 
+        /*[HttpGet("get-employees-with-roles")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Coordinator, Administrator")]
+        public async Task<IActionResult> GetEmployeesWithRoles()
+        {
+            try
+            {
+                _logger.LogInformation("=== GET EMPLOYEES WITH ROLES DEBUG START ===");
+
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                _logger.LogInformation($"User ID from claims: {userId}");
+
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    _logger.LogError($"Invalid user ID: {userId}");
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .Include(u => u.Role)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    _logger.LogError($"User not found with ID: {userIdInt}");
+                    return BadRequest("User not found");
+                }
+
+                _logger.LogInformation($"Found user: {user.username}, Personnel ID: {user.personnel_id}, Department ID: {user.department_id}, Role: {user.Role?.role_type}");
+
+                int departmentId = user.department_id;
+                string currentUserRole = user.Role?.role_type ?? "";
+
+                // FIXED: Restructure the query to avoid Include after Join
+                // First get users with their roles
+                var usersWithRoles = await _dbContext.Users
+                    .Where(u => u.department_id == departmentId && u.personnel_id != user.personnel_id)
+                    .Include(u => u.Role)
+                    .ToListAsync();
+
+                _logger.LogInformation($"Found {usersWithRoles.Count} users with roles in department {departmentId} (excluding current user)");
+
+                // Then join with employees
+                var employeesWithRoles = await _dbContext.EmployeesByDepartment
+                    .Where(e => e.department_id == departmentId && e.personnel_id != user.personnel_id)
+                    .Where(e => usersWithRoles.Select(u => u.personnel_id).Contains(e.personnel_id))
+                    .ToListAsync();
+
+                _logger.LogInformation($"Found {employeesWithRoles.Count} employees with user accounts in department {departmentId}");
+
+                // Create the combined result manually
+                var combinedResults = (from emp in employeesWithRoles
+                                       join usr in usersWithRoles on emp.personnel_id equals usr.personnel_id
+                                       select new
+                                       {
+                                           Employee = emp,
+                                           User = usr
+                                       }).ToList();
+
+                _logger.LogInformation($"Combined {combinedResults.Count} employee-user pairs");
+
+                // Log details of employees with roles
+                foreach (var empWithRole in combinedResults)
+                {
+                    _logger.LogInformation($"  Employee: {empWithRole.Employee.full_name}, Personnel ID: {empWithRole.Employee.personnel_id}, Role: {empWithRole.User.Role?.role_type ?? "NULL"}");
+                }
+
+                // Get current user's role for filtering
+                var allowedRoles = GetAllowedRolesForAssignment(currentUserRole);
+                _logger.LogInformation($"Allowed roles for {currentUserRole}: [{string.Join(", ", allowedRoles)}]");
+
+                // Apply role-based filtering
+                var filteredEmployees = combinedResults
+                    .Where(e => allowedRoles.Contains(e.User.Role?.role_type ?? ""))
+                    .ToList();
+
+                _logger.LogInformation($"After role filtering: {filteredEmployees.Count} employees");
+
+                // Log which employees passed the filter
+                foreach (var emp in filteredEmployees)
+                {
+                    _logger.LogInformation($"  Filtered IN: {emp.Employee.full_name} - Role: {emp.User.Role?.role_type}");
+                }
+
+                // Log which employees were filtered OUT
+                var excludedEmployees = combinedResults.Except(filteredEmployees);
+                foreach (var emp in excludedEmployees)
+                {
+                    _logger.LogInformation($"  Filtered OUT: {emp.Employee.full_name} - Role: {emp.User.Role?.role_type} (not in allowed roles)");
+                }
+
+                // Transform to the response model
+                var result = filteredEmployees.Select(e => new
+                {
+                    FullName = e.Employee.full_name,
+                    BirthDate = e.Employee.birth_date.ToString("yyyy-MM-dd"),
+                    Role = e.User.Role?.role_type ?? "",
+                    UserId = e.User.id
+                }).ToList();
+
+                _logger.LogInformation($"Final result count: {result.Count}");
+
+                // Log each result item
+                foreach (var item in result)
+                {
+                    _logger.LogInformation($"  Final Result: {item.FullName} ({item.BirthDate}) - {item.Role}");
+                }
+
+                _logger.LogInformation("=== GET EMPLOYEES WITH ROLES DEBUG END ===");
+                var jsonResult = JsonConvert.SerializeObject(result, new JsonSerializerSettings
+                {
+                    Formatting = Formatting.None
+                });
+
+                return Content(jsonResult, "application/json; charset=utf-8");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving employees with roles");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        // Keep the corrected GetAllowedRolesForAssignment method:
+        private List<string> GetAllowedRolesForAssignment(string currentUserRole)
+        {
+            var allowedRoles = new List<string>();
+
+            _logger.LogInformation($"Determining allowed roles for: '{currentUserRole}'");
+
+            switch (currentUserRole?.ToLower())
+            {
+                case "chiefofdepartment":      // CORRECTED: Fixed the typo
+                case "chief of department":
+                case "management":
+                    // Chief can assign to: Users, Coordinators, and Deputies
+                    allowedRoles.AddRange(new[] { "User", "Coordinator", "DeputyChief"});
+                    _logger.LogInformation("User is Chief - can assign to User, Coordinator, DeputyChief, Deputy Chief");
+                    break;
+
+                case "deputychief":
+                case "deputy chief":
+                case "deputy":
+                    allowedRoles.AddRange(new[] { "User", "Coordinator" });
+                    _logger.LogInformation("User is Deputy - can assign to User, Coordinator");
+                    break;
+
+                case "coordinator":
+                    allowedRoles.Add("User");
+                    _logger.LogInformation("User is Coordinator - can assign to User only");
+                    break;
+
+                case "administrator":
+                case "admin":
+                    allowedRoles.AddRange(new[] { "User", "Coordinator", "DeputyChief", "Deputy Chief", "ChiefOfDepartment", "Chief of Department", "Management" });
+                    _logger.LogInformation("User is Administrator - can assign to everyone");
+                    break;
+
+                default:
+                    _logger.LogWarning($"Unknown or unauthorized role: '{currentUserRole}' - no assignment permissions");
+                    break;
+            }
+
+            _logger.LogInformation($"Final allowed roles: [{string.Join(", ", allowedRoles)}]");
+            return allowedRoles;
+        }*/
+
+
+        [HttpGet("get-employees-with-roles")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Coordinator, Administrator")]
+        public async Task<IActionResult> GetEmployeesWithRoles()
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                // Get user from database
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .Include(u => u.Role)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                int departmentId = user.department_id;
+                string currentUserRole = user.Role?.role_type ?? "";
+
+                // Get users with their roles
+                var usersWithRoles = await _dbContext.Users
+                    .Where(u => u.department_id == departmentId && u.personnel_id != user.personnel_id)
+                    .Include(u => u.Role)
+                    .ToListAsync();
+
+                // Get employees with user accounts
+                var employeesWithRoles = await _dbContext.EmployeesByDepartment
+                    .Where(e => e.department_id == departmentId && e.personnel_id != user.personnel_id)
+                    .Where(e => usersWithRoles.Select(u => u.personnel_id).Contains(e.personnel_id))
+                    .ToListAsync();
+
+                // Combine employee and user data
+                var combinedResults = (from emp in employeesWithRoles
+                                       join usr in usersWithRoles on emp.personnel_id equals usr.personnel_id
+                                       select new
+                                       {
+                                           Employee = emp,
+                                           User = usr
+                                       }).ToList();
+
+                // Apply role-based filtering
+                var allowedRoles = GetAllowedRolesForAssignment(currentUserRole);
+                var filteredEmployees = combinedResults
+                    .Where(e => allowedRoles.Contains(e.User.Role?.role_type ?? ""))
+                    .ToList();
+
+                // Transform to response model
+                var result = filteredEmployees.Select(e => new
+                {
+                    FullName = e.Employee.full_name,
+                    BirthDate = e.Employee.birth_date.ToString("yyyy-MM-dd"),
+                    Role = e.User.Role?.role_type ?? "",
+                    UserId = e.User.id
+                }).ToList();
+
+                var jsonResult = JsonConvert.SerializeObject(result, new JsonSerializerSettings
+                {
+                    Formatting = Formatting.None
+                });
+
+                return Content(jsonResult, "application/json; charset=utf-8");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving employees with roles");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Gets the list of roles that the current user can assign instructions to
+        /// </summary>
+        /// <param name="currentUserRole">The role of the current user</param>
+        /// <returns>List of roles that can be assigned to</returns>
+        private List<string> GetAllowedRolesForAssignment(string currentUserRole)
+        {
+            var allowedRoles = new List<string>();
+
+            //_logger.LogInformation($"Determining allowed roles for current user role: '{currentUserRole}'");
+
+            switch (currentUserRole?.ToLower())
+            {
+                case "chiefofdepartment":
+                    // Chief can assign to: Users, Coordinators, and Deputies
+                    allowedRoles.AddRange(new[] { "User", "Coordinator", "DeputyChief" });
+                    //_logger.LogInformation("User is ChiefOfDepartment - can assign to User, Coordinator, DeputyChief");
+                    break;
+
+                case "deputychief":
+                    allowedRoles.AddRange(new[] { "User", "Coordinator" });
+                   // _logger.LogInformation("User is DeputyChief - can assign to User, Coordinator");
+                    break;
+
+                case "coordinator":
+                    allowedRoles.Add("User");
+                   // _logger.LogInformation("User is Coordinator - can assign to User only");
+                    break;
+
+                case "management":
+                    // Management can assign to everyone except Admin
+                    allowedRoles.AddRange(new[] { "User", "Coordinator", "DeputyChief", "ChiefOfDepartment" });
+                    //_logger.LogInformation("User is Management - can assign to User, Coordinator, DeputyChief, ChiefOfDepartment");
+                    break;
+
+                case "admin":
+                    // Admin can assign to everyone
+                    allowedRoles.AddRange(new[] { "User", "Coordinator", "DeputyChief", "ChiefOfDepartment", "Management" });
+                    //_logger.LogInformation("User is Admin - can assign to everyone");
+                    break;
+
+                default:
+                    _logger.LogWarning($"Unknown or unauthorized role: '{currentUserRole}' - no assignment permissions");
+                    break;
+            }
+
+            //_logger.LogInformation($"Final allowed roles: [{string.Join(", ", allowedRoles)}]");
+            return allowedRoles;
+        }
+
+        /// <summary>
+        /// Converts role code to display name for error messages
+        /// </summary>
+        /// <param name="role">Role code</param>
+        /// <returns>Display name in Russian</returns>
+        private string GetRoleDisplayName(string role)
+        {
+            return role?.ToLower() switch
+            {
+                "chiefofdepartment" => "Начальник отдела",
+                "deputychief" => "Заместитель начальника",
+                "coordinator" => "Координатор",
+                "user" => "Сотрудник",
+                "management" => "Главный инженер",
+                "admin" => "Администратор",
+                _ => role ?? "Неизвестная роль"
+            };
+        }
+
+
+
+
+        #endregion
 
         /// <summary>
         /// Adds a new instruction into the database.
@@ -1225,7 +1619,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="401">The user is not authenticated</response>
         /// <response code="403">The user doesn't have permission to add instructions</response>
         [HttpPost("add-new-instruction-into-db")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> AddNewInstructionIntoDB([FromBody] InstructionCreateDto instructionDto)
         {
             try
@@ -1456,7 +1850,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Internal server error occurred during the data export process.
         /// </response>
         [HttpPost("instructions-data-export")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> InstructionsDataExport([FromBody] InstructionExportRequest instructionExportRequest)
         {
             if (instructionExportRequest == null)
@@ -1866,7 +2260,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="403">Forbidden - The user does not have the required role.</response>
         /// <response code="500">Internal server error occurred during retrieval.</response>
         [HttpGet("get-all-instructions")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetAllInstructions()
         {
             try
@@ -1933,7 +2327,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="404">Not Found - The specified instruction was not found.</response>
         /// <response code="500">Internal server error occurred during retrieval.</response>
         [HttpGet("get-instruction/{id}")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetInstructionById(int id)
         {
             try
@@ -1992,7 +2386,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Updates an existing instruction.
         /// </summary>
         [HttpPut("update-instruction/{id}")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> UpdateInstruction(int id, [FromBody] InstructionUpdateDto instructionDto)
         {
             if (instructionDto == null)
@@ -2079,7 +2473,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <response code="404">Not Found - The specified instruction was not found.</response>
         /// <response code="500">Internal server error occurred during deletion.</response>
         [HttpDelete("delete-instruction/{id}")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> DeleteInstruction(int id)
         {
             try
@@ -2185,7 +2579,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Internal server error occurred during the retrieval process.
         /// </response>
         [HttpGet("get-not-passed-instructions-for-chief")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetNotPassedInstructionsForChief()
         {
             try
@@ -2300,7 +2694,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Internal server error occurred during the retrieval process.
         /// </response>
         [HttpGet("get-passed-instructions-for-chief")]
-        [Authorize(Roles = "ChiefOfDepartment, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
         public async Task<IActionResult> GetPassedInstructionsForChief()
         {
             try

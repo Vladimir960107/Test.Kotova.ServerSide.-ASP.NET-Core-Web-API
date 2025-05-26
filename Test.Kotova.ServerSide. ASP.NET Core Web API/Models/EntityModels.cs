@@ -111,6 +111,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 
         public bool is_passed_by_everyone { get; set; }
 
+        public bool is_passed_by_chief_unplanned_instr { get; set; }
+
         // Navigation properties
         [ForeignKey("department_id")]
         public virtual Department Department { get; set; }

@@ -174,6 +174,11 @@ builder.Services.AddAuthorization(options =>
             return context.User.IsInRole("Management");
         });
     });
+    options.AddPolicy("DeputyChief", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context => context.User.IsInRole("DeputyChief"));
+    });
 });
 
 builder.Services.AddScoped<LegacyAuthenticationService>();

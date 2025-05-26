@@ -35,6 +35,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .HasIndex(i => i.cause_of_instruction)
                 .IsUnique();
 
+            modelBuilder.Entity<Instruction>()
+                .Property(i => i.is_passed_by_chief_unplanned_instr)
+                .HasDefaultValue(false);
+
             // Configure unique constraint for personnel_number in Personnel
             modelBuilder.Entity<Personnel>()
                 .HasIndex(p => p.personnel_number)
