@@ -2814,5 +2814,311 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         #endregion
+
+        #region Manager stuff
+
+        // Add these endpoints to your InstructionsController.cs class
+
+        #region Management Endpoints for WPF Application
+
+        /// <summary>
+        /// Gets all departments with their chiefs and deputy chiefs for management interface
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves all departments along with their chiefs and deputy chiefs
+        /// for the Management WPF application to assign unplanned instructions.
+        /// Only accessible by Management role.
+        /// </remarks>
+        /// <returns>List of departments with chiefs</returns>
+        [HttpGet("get-departments-with-chiefs")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> GetDepartmentsWithChiefs()
+        {
+            try
+            {
+                var departments = await _dbContext.Departments
+                    .Include(d => d.Users)
+                        .ThenInclude(u => u.Role)
+                    .Include(d => d.Users)
+                        .ThenInclude(u => u.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment)
+                    .ToListAsync();
+
+                var result = departments.Select(dept => new DepartmentWithChiefsDto
+                {
+                    DepartmentId = dept.department_id,
+                    DepartmentName = dept.department_name,
+                    Chiefs = dept.Users
+                        .Where(u => u.Role != null &&
+                               (u.Role.role_type == "ChiefOfDepartment" || u.Role.role_type == "DeputyChief"))
+                        .Select(u => new ChiefDto
+                        {
+                            UserId = u.id,
+                            PersonnelId = u.personnel_id,
+                            Role = u.Role.role_type,
+                            FullName = u.Personnel?.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == dept.department_id)?.full_name ?? "Unknown",
+                            JobPosition = u.Personnel?.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == dept.department_id)?.job_position ?? "Unknown"
+                        })
+                        .ToList()
+                }).Where(d => d.Chiefs.Any()).ToList();
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving departments with chiefs");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Assigns an unplanned instruction to selected chiefs
+        /// </summary>
+        /// <remarks>
+        /// This endpoint creates an unplanned instruction and assigns it to the selected chiefs.
+        /// The instruction is created with type 1 (unplanned) and marked as assigned to the selected chiefs.
+        /// Only accessible by Management role.
+        /// </remarks>
+        /// <param name="package">Package containing instruction details and selected chief IDs</param>
+        /// <returns>Success message with assignment details</returns>
+        [HttpPost("assign-unplanned-instruction-to-chiefs")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> AssignUnplannedInstructionToChiefs([FromBody] UnplannedInstructionForChiefsPackage package)
+        {
+            try
+            {
+                if (package == null || package.Instruction == null || package.SelectedChiefIds == null || !package.SelectedChiefIds.Any())
+                {
+                    return BadRequest("Invalid package data");
+                }
+
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                // Get current user (Management)
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                var currentUser = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (currentUser == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Create an execution strategy
+                var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+                return await strategy.ExecuteAsync<IActionResult>(async () =>
+                {
+                    using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+                    {
+                        try
+                        {
+                            // Create the instruction for each department
+                            var assignedCount = 0;
+                            var createdInstructions = new List<string>();
+
+                            // Get the users (chiefs) to assign to
+                            var selectedUsers = await _dbContext.Users
+                                .Include(u => u.Department)
+                                .Include(u => u.Personnel)
+                                .Where(u => package.SelectedChiefIds.Contains(u.id))
+                                .ToListAsync();
+
+                            // Group by department to create department-specific instructions
+                            var departmentGroups = selectedUsers.GroupBy(u => u.department_id);
+
+                            foreach (var deptGroup in departmentGroups)
+                            {
+                                var departmentId = deptGroup.Key;
+                                var usersInDept = deptGroup.ToList();
+
+                                // Check if instruction with same cause already exists for this department
+                                var existingInstruction = await _dbContext.Instructions
+                                    .FirstOrDefaultAsync(i => i.cause_of_instruction == package.Instruction.CauseOfInstruction
+                                                           && i.department_id == departmentId);
+
+                                Models.Instruction instruction;
+
+                                if (existingInstruction != null)
+                                {
+                                    instruction = existingInstruction;
+                                }
+                                else
+                                {
+                                    // Create new instruction for this department
+                                    instruction = new Models.Instruction
+                                    {
+                                        cause_of_instruction = package.Instruction.CauseOfInstruction,
+                                        begin_date = DateTime.UtcNow,
+                                        end_date = package.Instruction.EndDate,
+                                        type_of_instruction = package.Instruction.TypeOfInstruction,
+                                        department_id = departmentId,
+                                        is_assigned_to_people = true,
+                                        is_passed_by_everyone = false,
+                                        is_passed_by_chief_unplanned_instr = false
+                                    };
+
+                                    _dbContext.Instructions.Add(instruction);
+                                    await _dbContext.SaveChangesAsync();
+                                }
+
+                                // Create instruction statuses for each user in this department
+                                foreach (var user in usersInDept)
+                                {
+                                    // Check if status already exists
+                                    var existingStatus = await _dbContext.InstructionStatuses
+                                        .FirstOrDefaultAsync(s => s.instruction_id == instruction.instruction_id
+                                                               && s.personnel_id == user.personnel_id);
+
+                                    if (existingStatus == null)
+                                    {
+                                        var instructionStatus = new InstructionStatus
+                                        {
+                                            instruction_id = instruction.instruction_id,
+                                            personnel_id = user.personnel_id,
+                                            department_id = departmentId,
+                                            is_instruction_passed = false,
+                                            when_was_sent_to_user = DateTime.Now,
+                                            when_was_sent_to_user_UTC = DateTime.UtcNow,
+                                            was_signed_by_personnel_id = currentUser.personnel_id
+                                        };
+
+                                        _dbContext.InstructionStatuses.Add(instructionStatus);
+                                        await _dbContext.SaveChangesAsync();
+
+                                        // Add normative instructions if provided
+                                        if (package.NormativeInstructionIds != null && package.NormativeInstructionIds.Any())
+                                        {
+                                            foreach (var normativeId in package.NormativeInstructionIds)
+                                            {
+                                                var junction = new InstructionStatusToNormativeInstrName
+                                                {
+                                                    instruction_status_id = instructionStatus.id,
+                                                    normative_instruction_name_id = normativeId
+                                                };
+
+                                                _dbContext.InstructionStatusToNormativeInstrNames.Add(junction);
+                                            }
+                                        }
+
+                                        assignedCount++;
+                                    }
+                                }
+
+                                createdInstructions.Add($"Department {departmentId}");
+                            }
+
+                            await _dbContext.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            var response = new { Message = $"Instruction assigned to {assignedCount} chiefs across {departmentGroups.Count()} departments" };
+                            return Ok(response);
+                        }
+                        catch (Exception ex)
+                        {
+                            await transaction.RollbackAsync();
+                            _logger.LogError(ex, "Error assigning unplanned instruction to chiefs");
+                            throw;
+                        }
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AssignUnplannedInstructionToChiefs");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        /// <summary>
+        /// Gets status of unplanned instructions assigned to chiefs
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves the status of all unplanned instructions that have been
+        /// assigned to chiefs, showing which chiefs have completed them and which haven't.
+        /// Only accessible by Management role.
+        /// </remarks>
+        /// <returns>List of instruction statuses with chief completion data</returns>
+        [HttpGet("get-unplanned-instructions-for-chiefs-status")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> GetUnplannedInstructionsForChiefsStatus()
+        {
+            try
+            {
+                // Get all unplanned instructions (type 1) that are assigned to people
+                var unplannedInstructions = await _dbContext.Instructions
+                    .Where(i => i.type_of_instruction == 1 && i.is_assigned_to_people)
+                    .Include(i => i.InstructionType)
+                    .Include(i => i.InstructionStatuses)
+                        .ThenInclude(s => s.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment)
+                    .Include(i => i.InstructionStatuses)
+                        .ThenInclude(s => s.Department)
+                    .OrderByDescending(i => i.begin_date)
+                    .ToListAsync();
+
+                var result = new List<UnplannedInstructionStatusDto>();
+
+                foreach (var instruction in unplannedInstructions)
+                {
+                    // Get all statuses for chiefs/deputies only
+                    var chiefStatuses = instruction.InstructionStatuses
+                        .Where(s => s.Personnel.EmployeesByDepartment.Any(e =>
+                            e.job_position.Contains("начальник") ||
+                            e.job_position.Contains("заместитель") ||
+                            e.job_position.Contains("Начальник") ||
+                            e.job_position.Contains("Заместитель")))
+                        .ToList();
+
+                    if (!chiefStatuses.Any()) continue;
+
+                    var statusDto = new UnplannedInstructionStatusDto
+                    {
+                        InstructionId = instruction.instruction_id,
+                        CauseOfInstruction = instruction.cause_of_instruction,
+                        BeginDate = instruction.begin_date,
+                        EndDate = instruction.end_date,
+                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? "Внеплановый",
+                        TotalAssigned = chiefStatuses.Count,
+                        TotalPassed = chiefStatuses.Count(s => s.is_instruction_passed),
+                        ChiefStatuses = chiefStatuses.Select(s => new ChiefStatusDto
+                        {
+                            ChiefName = s.Personnel.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == s.department_id)?.full_name ?? "Unknown",
+                            DepartmentName = s.Department?.department_name ?? "Unknown",
+                            JobPosition = s.Personnel.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == s.department_id)?.job_position ?? "Unknown",
+                            IsPassed = s.is_instruction_passed,
+                            DatePassed = s.date_when_passed,
+                            DateAssigned = s.when_was_sent_to_user
+                        }).ToList()
+                    };
+
+                    result.Add(statusDto);
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving unplanned instructions status");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        #endregion
+
+        #endregion
     }
 }
