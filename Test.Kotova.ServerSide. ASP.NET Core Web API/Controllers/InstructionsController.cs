@@ -2873,23 +2873,25 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        // Add this new method to your InstructionsController.cs
+        // Replace the existing assign-unplanned-instruction-to-chiefs method
+
         /// <summary>
-        /// Assigns an unplanned instruction to selected chiefs
+        /// Assigns an unplanned instruction to all chiefs in selected departments
         /// </summary>
         /// <remarks>
-        /// This endpoint creates an unplanned instruction and assigns it to the selected chiefs.
-        /// The instruction is created with type 1 (unplanned) and marked as assigned to the selected chiefs.
-        /// Only accessible by Management role.
+        /// This endpoint creates an unplanned instruction and assigns it to all chiefs and deputy chiefs
+        /// in the selected departments. Only accessible by Management role.
         /// </remarks>
-        /// <param name="package">Package containing instruction details and selected chief IDs</param>
+        /// <param name="package">Package containing instruction details and selected department IDs</param>
         /// <returns>Success message with assignment details</returns>
-        [HttpPost("assign-unplanned-instruction-to-chiefs")]
+        [HttpPost("assign-unplanned-instruction-to-departments")]
         [Authorize(Roles = "Management, Administrator")]
-        public async Task<IActionResult> AssignUnplannedInstructionToChiefs([FromBody] UnplannedInstructionForChiefsPackage package)
+        public async Task<IActionResult> AssignUnplannedInstructionToDepartments([FromBody] UnplannedInstructionForDepartmentsPackage package)
         {
             try
             {
-                if (package == null || package.Instruction == null || package.SelectedChiefIds == null || !package.SelectedChiefIds.Any())
+                if (package == null || package.Instruction == null || package.SelectedDepartmentIds == null || !package.SelectedDepartmentIds.Any())
                 {
                     return BadRequest("Invalid package data");
                 }
@@ -2924,24 +2926,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     {
                         try
                         {
-                            // Create the instruction for each department
                             var assignedCount = 0;
-                            var createdInstructions = new List<string>();
+                            var processedDepartments = new List<string>();
 
-                            // Get the users (chiefs) to assign to
-                            var selectedUsers = await _dbContext.Users
-                                .Include(u => u.Department)
-                                .Include(u => u.Personnel)
-                                .Where(u => package.SelectedChiefIds.Contains(u.id))
-                                .ToListAsync();
-
-                            // Group by department to create department-specific instructions
-                            var departmentGroups = selectedUsers.GroupBy(u => u.department_id);
-
-                            foreach (var deptGroup in departmentGroups)
+                            foreach (var departmentId in package.SelectedDepartmentIds)
                             {
-                                var departmentId = deptGroup.Key;
-                                var usersInDept = deptGroup.ToList();
+                                // Get all chiefs and deputy chiefs in this department
+                                var departmentChiefs = await _dbContext.Users
+                                    .Include(u => u.Role)
+                                    .Include(u => u.Personnel)
+                                        .ThenInclude(p => p.EmployeesByDepartment)
+                                    .Where(u => u.department_id == departmentId &&
+                                           u.Role != null &&
+                                           (u.Role.role_type == "ChiefOfDepartment" || u.Role.role_type == "DeputyChief"))
+                                    .ToListAsync();
+
+                                if (!departmentChiefs.Any())
+                                {
+                                    _logger.LogWarning($"No chiefs found in department {departmentId}");
+                                    continue;
+                                }
 
                                 // Check if instruction with same cause already exists for this department
                                 var existingInstruction = await _dbContext.Instructions
@@ -2953,6 +2957,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                 if (existingInstruction != null)
                                 {
                                     instruction = existingInstruction;
+                                    _logger.LogInformation($"Using existing instruction {instruction.instruction_id} for department {departmentId}");
                                 }
                                 else
                                 {
@@ -2971,22 +2976,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                                     _dbContext.Instructions.Add(instruction);
                                     await _dbContext.SaveChangesAsync();
+                                    _logger.LogInformation($"Created new instruction {instruction.instruction_id} for department {departmentId}");
                                 }
 
-                                // Create instruction statuses for each user in this department
-                                foreach (var user in usersInDept)
+                                // Create instruction statuses for each chief in this department
+                                foreach (var chief in departmentChiefs)
                                 {
                                     // Check if status already exists
                                     var existingStatus = await _dbContext.InstructionStatuses
                                         .FirstOrDefaultAsync(s => s.instruction_id == instruction.instruction_id
-                                                               && s.personnel_id == user.personnel_id);
+                                                               && s.personnel_id == chief.personnel_id);
 
                                     if (existingStatus == null)
                                     {
                                         var instructionStatus = new InstructionStatus
                                         {
                                             instruction_id = instruction.instruction_id,
-                                            personnel_id = user.personnel_id,
+                                            personnel_id = chief.personnel_id,
                                             department_id = departmentId,
                                             is_instruction_passed = false,
                                             when_was_sent_to_user = DateTime.Now,
@@ -3013,22 +3019,31 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                         }
 
                                         assignedCount++;
+                                        _logger.LogInformation($"Assigned instruction to chief {chief.personnel_id} in department {departmentId}");
                                     }
                                 }
 
-                                createdInstructions.Add($"Department {departmentId}");
+                                var departmentName = await _dbContext.Departments
+                                    .Where(d => d.department_id == departmentId)
+                                    .Select(d => d.department_name)
+                                    .FirstOrDefaultAsync();
+
+                                processedDepartments.Add(departmentName ?? $"Department {departmentId}");
                             }
 
                             await _dbContext.SaveChangesAsync();
                             await transaction.CommitAsync();
 
-                            var response = new { Message = $"Instruction assigned to {assignedCount} chiefs across {departmentGroups.Count()} departments" };
+                            var response = new
+                            {
+                                Message = $"Instruction '{package.Instruction.CauseOfInstruction}' assigned to {assignedCount} chiefs across {processedDepartments.Count} departments: {string.Join(", ", processedDepartments)}"
+                            };
                             return Ok(response);
                         }
                         catch (Exception ex)
                         {
                             await transaction.RollbackAsync();
-                            _logger.LogError(ex, "Error assigning unplanned instruction to chiefs");
+                            _logger.LogError(ex, "Error assigning unplanned instruction to departments");
                             throw;
                         }
                     }
@@ -3036,11 +3051,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in AssignUnplannedInstructionToChiefs");
+                _logger.LogError(ex, "Error in AssignUnplannedInstructionToDepartments");
                 return StatusCode(500, "Internal server error");
             }
         }
 
+        
         /// <summary>
         /// Gets status of unplanned instructions assigned to chiefs
         /// </summary>
