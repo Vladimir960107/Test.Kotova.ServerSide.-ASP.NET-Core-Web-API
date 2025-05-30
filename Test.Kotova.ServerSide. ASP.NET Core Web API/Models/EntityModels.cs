@@ -214,6 +214,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
 
         public DateTime created_at { get; set; }
 
+        // Add this new property
+        public bool is_unplanned_instruction { get; set; }
+
         // Navigation properties
         public virtual ICollection<InstructionStatusToNormativeInstrName> InstructionStatuses { get; set; }
     }

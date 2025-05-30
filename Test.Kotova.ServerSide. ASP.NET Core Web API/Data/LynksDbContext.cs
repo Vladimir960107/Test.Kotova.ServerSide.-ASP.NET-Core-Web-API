@@ -71,6 +71,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .Property(n => n.created_at)
                 .HasDefaultValueSql("GETDATE()");
 
+            // Add this new configuration for the is_unplanned_instruction column
+            modelBuilder.Entity<NormativeInstructionName>()
+                .Property(n => n.is_unplanned_instruction)
+                .HasDefaultValue(false);
+
             /*modelBuilder.Entity<Task>() //TASK IS NOT IMPLEMENTED YET
                 .Property(t => t.created_at)
                 .HasDefaultValueSql("GETDATE()");

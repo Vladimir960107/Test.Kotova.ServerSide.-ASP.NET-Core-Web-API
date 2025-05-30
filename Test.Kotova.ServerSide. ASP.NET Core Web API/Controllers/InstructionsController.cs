@@ -2038,19 +2038,28 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// </response>
         [HttpGet("normative-instructions")]
         [Authorize]
-        public async Task<IActionResult> GetNormativeInstructions()
+        public async Task<IActionResult> GetNormativeInstructions([FromQuery] bool? isUnplannedInstruction = null)
         {
             try
             {
-                var normativeInstructions = await _dbContext.NormativeInstructionNames.ToListAsync();
+                var query = _dbContext.NormativeInstructionNames.AsQueryable();
+
+                // Filter by isUnplannedInstruction if specified
+                if (isUnplannedInstruction.HasValue)
+                {
+                    query = query.Where(ni => ni.is_unplanned_instruction == isUnplannedInstruction.Value);
+                }
+
+                var normativeInstructions = await query.ToListAsync();
 
                 // Map to DTOs explicitly to ensure proper property mapping
-                var result = normativeInstructions.Select(ni => new
+                var result = normativeInstructions.Select(ni => new NormativeInstructionDto
                 {
                     Id = ni.id,
                     Name = ni.normative_instruction_name,
                     Url = ni.url,
-                    CreatedAt = ni.created_at
+                    CreatedAt = ni.created_at,
+                    IsUnplannedInstruction = ni.is_unplanned_instruction
                 }).ToList();
 
                 return Ok(result);
@@ -2090,7 +2099,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// </response>
         [HttpPost("normative-instructions")]
         [Authorize(Roles = "Coordinator, Administrator")]
-        public async Task<IActionResult> CreateNormativeInstruction([FromBody] NormativeInstructionCreateModel model)
+        public async Task<IActionResult> CreateNormativeInstruction([FromBody] NormativeInstructionCreateDto model)
         {
             if (!ModelState.IsValid)
             {
@@ -2103,13 +2112,23 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 {
                     normative_instruction_name = model.Name,
                     url = model.Url,
-                    created_at = DateTime.UtcNow
+                    created_at = DateTime.UtcNow,
+                    is_unplanned_instruction = model.IsUnplannedInstruction
                 };
 
                 _dbContext.NormativeInstructionNames.Add(normativeInstruction);
                 await _dbContext.SaveChangesAsync();
 
-                return CreatedAtAction(nameof(GetNormativeInstructions), null, normativeInstruction);
+                var result = new NormativeInstructionDto
+                {
+                    Id = normativeInstruction.id,
+                    Name = normativeInstruction.normative_instruction_name,
+                    Url = normativeInstruction.url,
+                    CreatedAt = normativeInstruction.created_at,
+                    IsUnplannedInstruction = normativeInstruction.is_unplanned_instruction
+                };
+
+                return CreatedAtAction(nameof(GetNormativeInstructions), null, result);
             }
             catch (Exception ex)
             {
@@ -2873,15 +2892,90 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        // Add this new method to your InstructionsController.cs
-        // Replace the existing assign-unplanned-instruction-to-chiefs method
+        
+        /// <summary>
+        /// Gets status of unplanned instructions assigned to chiefs
+        /// </summary>
+        /// <remarks>
+        /// This endpoint retrieves the status of all unplanned instructions that have been
+        /// assigned to chiefs, showing which chiefs have completed them and which haven't.
+        /// Only accessible by Management role.
+        /// </remarks>
+        /// <returns>List of instruction statuses with chief completion data</returns>
+        [HttpGet("get-unplanned-instructions-for-chiefs-status")]
+        [Authorize(Roles = "Management, Administrator")]
+        public async Task<IActionResult> GetUnplannedInstructionsForChiefsStatus()
+        {
+            try
+            {
+                // Get all unplanned instructions (type 1) that are assigned to people
+                var unplannedInstructions = await _dbContext.Instructions
+                    .Where(i => i.type_of_instruction == 1 && i.is_assigned_to_people)
+                    .Include(i => i.InstructionType)
+                    .Include(i => i.InstructionStatuses)
+                        .ThenInclude(s => s.Personnel)
+                            .ThenInclude(p => p.EmployeesByDepartment)
+                    .Include(i => i.InstructionStatuses)
+                        .ThenInclude(s => s.Department)
+                    .OrderByDescending(i => i.begin_date)
+                    .ToListAsync();
+
+                var result = new List<UnplannedInstructionStatusDto>();
+
+                foreach (var instruction in unplannedInstructions)
+                {
+                    // Get all statuses for chiefs/deputies only
+                    var chiefStatuses = instruction.InstructionStatuses
+                        .Where(s => s.Personnel.EmployeesByDepartment.Any(e =>
+                            e.job_position.Contains("начальник") ||
+                            e.job_position.Contains("заместитель") ||
+                            e.job_position.Contains("Начальник") ||
+                            e.job_position.Contains("Заместитель")))
+                        .ToList();
+
+                    if (!chiefStatuses.Any()) continue;
+
+                    var statusDto = new UnplannedInstructionStatusDto
+                    {
+                        InstructionId = instruction.instruction_id,
+                        CauseOfInstruction = instruction.cause_of_instruction,
+                        BeginDate = instruction.begin_date,
+                        EndDate = instruction.end_date,
+                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? "Внеплановый",
+                        TotalAssigned = chiefStatuses.Count,
+                        TotalPassed = chiefStatuses.Count(s => s.is_instruction_passed),
+                        ChiefStatuses = chiefStatuses.Select(s => new ChiefStatusDto
+                        {
+                            ChiefName = s.Personnel.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == s.department_id)?.full_name ?? "Unknown",
+                            DepartmentName = s.Department?.department_name ?? "Unknown",
+                            JobPosition = s.Personnel.EmployeesByDepartment
+                                .FirstOrDefault(e => e.department_id == s.department_id)?.job_position ?? "Unknown",
+                            IsPassed = s.is_instruction_passed,
+                            DatePassed = s.date_when_passed,
+                            DateAssigned = s.when_was_sent_to_user
+                        }).ToList()
+                    };
+
+                    result.Add(statusDto);
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving unplanned instructions status");
+                return StatusCode(500, "Internal server error");
+            }
+        }
 
         /// <summary>
-        /// Assigns an unplanned instruction to all chiefs in selected departments
+        /// Assigns an unplanned instruction to all chiefs in selected departments with normative base processing
         /// </summary>
         /// <remarks>
         /// This endpoint creates an unplanned instruction and assigns it to all chiefs and deputy chiefs
-        /// in the selected departments. Only accessible by Management role.
+        /// in the selected departments. It also processes multiline normative base names and links.
+        /// Only accessible by Management role.
         /// </remarks>
         /// <param name="package">Package containing instruction details and selected department IDs</param>
         /// <returns>Success message with assignment details</returns>
@@ -2915,6 +3009,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 if (currentUser == null)
                 {
                     return BadRequest("User not found");
+                }
+
+                // Process normative instructions if provided
+                int? createdNormativeInstructionId = null;
+                if (!string.IsNullOrEmpty(package.NormativeBaseText))
+                {
+                    // Use the MarkNormativeAsUnplanned property from the package
+                    createdNormativeInstructionId = await ProcessNormativeBaseText(
+                        package.NormativeBaseText,
+                        package.MarkNormativeAsUnplanned);
                 }
 
                 // Create an execution strategy
@@ -3003,7 +3107,19 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                         _dbContext.InstructionStatuses.Add(instructionStatus);
                                         await _dbContext.SaveChangesAsync();
 
-                                        // Add normative instructions if provided
+                                        // Add the created normative instruction if available
+                                        if (createdNormativeInstructionId.HasValue)
+                                        {
+                                            var junction = new InstructionStatusToNormativeInstrName
+                                            {
+                                                instruction_status_id = instructionStatus.id,
+                                                normative_instruction_name_id = createdNormativeInstructionId.Value
+                                            };
+
+                                            _dbContext.InstructionStatusToNormativeInstrNames.Add(junction);
+                                        }
+
+                                        // Add any additional normative instructions from the package
                                         if (package.NormativeInstructionIds != null && package.NormativeInstructionIds.Any())
                                         {
                                             foreach (var normativeId in package.NormativeInstructionIds)
@@ -3056,80 +3172,65 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
-        
         /// <summary>
-        /// Gets status of unplanned instructions assigned to chiefs
+        /// Processes normative base text with names and links, creates a single normative instruction
         /// </summary>
-        /// <remarks>
-        /// This endpoint retrieves the status of all unplanned instructions that have been
-        /// assigned to chiefs, showing which chiefs have completed them and which haven't.
-        /// Only accessible by Management role.
-        /// </remarks>
-        /// <returns>List of instruction statuses with chief completion data</returns>
-        [HttpGet("get-unplanned-instructions-for-chiefs-status")]
-        [Authorize(Roles = "Management, Administrator")]
-        public async Task<IActionResult> GetUnplannedInstructionsForChiefsStatus()
+        /// <param name="normativeBaseText">Text containing names and links separated by newlines</param>
+        /// <returns>ID of the created normative instruction</returns>
+        private async Task<int> ProcessNormativeBaseText(string normativeBaseText, bool markAsUnplanned = true)
         {
             try
             {
-                // Get all unplanned instructions (type 1) that are assigned to people
-                var unplannedInstructions = await _dbContext.Instructions
-                    .Where(i => i.type_of_instruction == 1 && i.is_assigned_to_people)
-                    .Include(i => i.InstructionType)
-                    .Include(i => i.InstructionStatuses)
-                        .ThenInclude(s => s.Personnel)
-                            .ThenInclude(p => p.EmployeesByDepartment)
-                    .Include(i => i.InstructionStatuses)
-                        .ThenInclude(s => s.Department)
-                    .OrderByDescending(i => i.begin_date)
-                    .ToListAsync();
+                // Parse the normative base text
+                // Expected format: "NAMES: name1 | name2 | name3 | LINKS: link1 | link2 | link3"
+                var parts = normativeBaseText.Split(new[] { " | LINKS: " }, StringSplitOptions.None);
 
-                var result = new List<UnplannedInstructionStatusDto>();
+                string namesSection = "";
+                string linksSection = "";
 
-                foreach (var instruction in unplannedInstructions)
+                if (parts.Length >= 1)
                 {
-                    // Get all statuses for chiefs/deputies only
-                    var chiefStatuses = instruction.InstructionStatuses
-                        .Where(s => s.Personnel.EmployeesByDepartment.Any(e =>
-                            e.job_position.Contains("начальник") ||
-                            e.job_position.Contains("заместитель") ||
-                            e.job_position.Contains("Начальник") ||
-                            e.job_position.Contains("Заместитель")))
-                        .ToList();
-
-                    if (!chiefStatuses.Any()) continue;
-
-                    var statusDto = new UnplannedInstructionStatusDto
-                    {
-                        InstructionId = instruction.instruction_id,
-                        CauseOfInstruction = instruction.cause_of_instruction,
-                        BeginDate = instruction.begin_date,
-                        EndDate = instruction.end_date,
-                        TypeName = instruction.InstructionType?.name_of_type_instruction ?? "Внеплановый",
-                        TotalAssigned = chiefStatuses.Count,
-                        TotalPassed = chiefStatuses.Count(s => s.is_instruction_passed),
-                        ChiefStatuses = chiefStatuses.Select(s => new ChiefStatusDto
-                        {
-                            ChiefName = s.Personnel.EmployeesByDepartment
-                                .FirstOrDefault(e => e.department_id == s.department_id)?.full_name ?? "Unknown",
-                            DepartmentName = s.Department?.department_name ?? "Unknown",
-                            JobPosition = s.Personnel.EmployeesByDepartment
-                                .FirstOrDefault(e => e.department_id == s.department_id)?.job_position ?? "Unknown",
-                            IsPassed = s.is_instruction_passed,
-                            DatePassed = s.date_when_passed,
-                            DateAssigned = s.when_was_sent_to_user
-                        }).ToList()
-                    };
-
-                    result.Add(statusDto);
+                    namesSection = parts[0].Replace("NAMES: ", "").Trim();
                 }
 
-                return Ok(result);
+                if (parts.Length >= 2)
+                {
+                    linksSection = parts[1].Trim();
+                }
+
+                // Create a combined normative instruction name
+                string combinedName = $"Нормативная база: {namesSection}";
+                string combinedUrl = linksSection;
+
+                // Check if this normative instruction already exists
+                var existingNormative = await _dbContext.NormativeInstructionNames
+                    .FirstOrDefaultAsync(n => n.normative_instruction_name == combinedName);
+
+                if (existingNormative != null)
+                {
+                    return existingNormative.id;
+                }
+
+                // Create new normative instruction
+                var normativeInstruction = new NormativeInstructionName
+                {
+                    normative_instruction_name = combinedName,
+                    url = combinedUrl,
+                    created_at = DateTime.UtcNow,
+                    is_unplanned_instruction = markAsUnplanned // Set based on parameter
+                };
+
+                _dbContext.NormativeInstructionNames.Add(normativeInstruction);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation($"Created normative instruction with ID {normativeInstruction.id}: {combinedName}");
+
+                return normativeInstruction.id;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving unplanned instructions status");
-                return StatusCode(500, "Internal server error");
+                _logger.LogError(ex, "Error processing normative base text");
+                throw new Exception($"Error creating normative instruction: {ex.Message}", ex);
             }
         }
 
