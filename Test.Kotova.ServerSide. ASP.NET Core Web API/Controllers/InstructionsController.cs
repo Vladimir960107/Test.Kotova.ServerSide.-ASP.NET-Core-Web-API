@@ -248,11 +248,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         /// <summary>
-        /// Marks an instruction as passed by the authenticated user.
+        /// Marks an instruction as passed for the authenticated user.
+        /// If it's an unplanned instruction and the user is a chief/deputy, also sets is_passed_by_chief_unplanned_instr to true.
         /// </summary>
         /// <remarks>
-        /// This endpoint marks a specific instruction as passed by the authenticated user.
-        /// Requires the user to be authenticated.
+        /// This endpoint allows authenticated users to mark an instruction as passed.
+        /// For unplanned instructions, if the user is a chief or deputy, it also triggers
+        /// the is_passed_by_chief_unplanned_instr flag to allow assignment to other employees.
         /// </remarks>
         /// <param name="instructionId">The ID of the instruction to mark as passed</param>
         /// <returns>
@@ -278,9 +280,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return BadRequest("Invalid user ID");
                 }
 
-                // Get user from database
+                // Get user from database with personnel and employee information
                 var user = await _dbContext.Users
                     .Include(u => u.Personnel)
+                        .ThenInclude(p => p.EmployeesByDepartment)
                     .FirstOrDefaultAsync(u => u.id == userIdInt);
 
                 if (user == null)
@@ -295,6 +298,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 // Get instruction status
                 var instructionStatus = await _dbContext.InstructionStatuses
+                    .Include(s => s.Instruction) // Include instruction to check type
                     .FirstOrDefaultAsync(s => s.instruction_id == instructionId && s.personnel_id == user.personnel_id);
 
                 if (instructionStatus == null)
@@ -307,13 +311,43 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 instructionStatus.date_when_passed = DateTime.Now;
                 instructionStatus.date_when_passed_UTC = DateTime.UtcNow;
 
+                // NEW: Check if this is an unplanned instruction and if the user is a chief/deputy
+                if (instructionStatus.Instruction.type_of_instruction == 1) // Unplanned instruction
+                {
+                    // Check if the user is a chief or deputy by role ID
+                    // Role ID 2 = ChiefOfDepartment, Role ID 6 = DeputyChief
+                    bool isChiefOrDeputy = user.user_role_id == 2 || user.user_role_id == 6; //TODO: Remove the HardCode.
+
+                    if (isChiefOrDeputy)
+                    {
+                        // Set the flag to true - this instruction can now be assigned to other employees
+                        instructionStatus.Instruction.is_passed_by_chief_unplanned_instr = true;
+                        _dbContext.Instructions.Update(instructionStatus.Instruction);
+
+                        var employee = user.Personnel?.EmployeesByDepartment?
+                            .FirstOrDefault(e => e.department_id == instructionStatus.department_id);
+                        var employeeName = employee?.full_name ?? "Unknown";
+
+                        _logger.LogInformation($"Unplanned instruction {instructionId} marked as passed by chief/deputy (Role ID: {user.user_role_id}) {employeeName}. Instruction is now available for assignment.");
+                    }
+                }
+
                 // Save changes
                 await _dbContext.SaveChangesAsync();
 
                 // Check if all personnel have passed this instruction
                 await CheckAndUpdateInstructionCompletionStatus(instructionId);
 
-                return Ok("Instruction successfully marked as passed");
+                var responseMessage = "Instruction successfully marked as passed";
+
+                // Add additional message for unplanned instructions passed by chief/deputy
+                if (instructionStatus.Instruction.type_of_instruction == 1 &&
+                    instructionStatus.Instruction.is_passed_by_chief_unplanned_instr)
+                {
+                    responseMessage += ". This unplanned instruction is now available for assignment to other employees.";
+                }
+
+                return Ok(responseMessage);
             }
             catch (Exception ex)
             {
@@ -359,6 +393,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             return Ok("Связь с сервером есть!");
         }
+
 
         [HttpGet("sync-instructions-with-db")]
         [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
@@ -2300,14 +2335,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return BadRequest("User not found");
                 }
 
-                // Get all instructions for the department
+                // Get all instructions for the department that haven't been assigned to people yet
                 var instructions = await _dbContext.Instructions
                     .Where(i => i.department_id == user.department_id && !i.is_assigned_to_people)
                     .Include(i => i.InstructionType)
                     .Include(i => i.FilePaths)
                     .ToListAsync();
 
-                // Map to DTOs
+                // Map to DTOs including the is_passed_by_chief_unplanned_instr field
                 var result = instructions.Select(i => new
                 {
                     i.instruction_id,
@@ -2317,6 +2352,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     i.type_of_instruction,
                     i.is_assigned_to_people,
                     i.is_passed_by_everyone,
+                    i.is_passed_by_chief_unplanned_instr, // Include this field
                     TypeName = i.InstructionType?.name_of_type_instruction,
                     FilePaths = i.FilePaths.Select(fp => fp.file_path).ToList()
                 }).ToList();
@@ -2910,7 +2946,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 // Get all unplanned instructions (type 1) that are assigned to people
                 var unplannedInstructions = await _dbContext.Instructions
-                    .Where(i => i.type_of_instruction == 1 && i.is_assigned_to_people)
+                    .Where(i => i.type_of_instruction == 1 && i.InstructionStatuses.Any())
                     .Include(i => i.InstructionType)
                     .Include(i => i.InstructionStatuses)
                         .ThenInclude(s => s.Personnel)
@@ -3073,7 +3109,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                                         end_date = package.Instruction.EndDate,
                                         type_of_instruction = package.Instruction.TypeOfInstruction,
                                         department_id = departmentId,
-                                        is_assigned_to_people = true,
+                                        is_assigned_to_people = false,
                                         is_passed_by_everyone = false,
                                         is_passed_by_chief_unplanned_instr = false
                                     };
@@ -3171,6 +3207,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 return StatusCode(500, "Internal server error");
             }
         }
+
+
 
         /// <summary>
         /// Processes normative base text with names and links, creates a single normative instruction
