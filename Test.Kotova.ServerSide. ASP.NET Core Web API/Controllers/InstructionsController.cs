@@ -1022,6 +1022,162 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             });
         }*/
 
+        // Add this method to InstructionsController.cs
+
+        /// <summary>
+        /// Assigns an unplanned instruction to selected employees with predetermined normative instructions.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint is specifically for assigning unplanned instructions that have already been passed by chiefs.
+        /// The normative instructions are predetermined and cannot be modified during assignment.
+        /// </remarks>
+        /// <param name="package">Package containing instruction details and selected employees</param>
+        /// <returns>Success message with assignment details</returns>
+        /// <response code="200">The unplanned instruction was successfully assigned.</response>
+        /// <response code="400">Bad request - Invalid package data or instruction not ready for assignment.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
+        /// <response code="500">Internal server error occurred during assignment.</response>
+        [HttpPost("assign-unplanned-instruction-to-employees")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
+        public async Task<IActionResult> AssignUnplannedInstructionToEmployees([FromBody] UnplannedInstructionAssignmentPackage package)
+        {
+            if (package == null || package.SelectedEmployees == null || !package.SelectedEmployees.Any())
+                return BadRequest("Invalid package data or no employees selected");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                return BadRequest("Invalid user ID");
+
+            var currentUser = await _dbContext.Users
+                .Include(u => u.Department)
+                .Include(u => u.Personnel)
+                .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+            if (currentUser == null)
+                return BadRequest("User not found");
+
+            var instruction = await _dbContext.Instructions
+                .FirstOrDefaultAsync(i => i.instruction_id == package.InstructionId);
+
+            if (instruction == null)
+                return BadRequest($"Instruction with ID {package.InstructionId} not found");
+
+            if (instruction.type_of_instruction != 1) // 1 = unplanned
+                return BadRequest("This endpoint is only for unplanned instructions");
+
+            if (!instruction.is_passed_by_chief_unplanned_instr)
+                return BadRequest("Unplanned instruction must be passed by chief before assignment");
+
+            if (instruction.department_id != currentUser.department_id)
+                return Forbid("You can only assign instructions from your department");
+
+            // ✅ Wrap everything inside EF retry strategy
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                var failedAssignments = new List<string>();
+                int assignmentCount = 0;
+
+                try
+                {
+                    foreach (var employeeInfo in package.SelectedEmployees)
+                    {
+                        if (!DateTime.TryParseExact(employeeInfo.BirthDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedBirthDate))
+                        {
+                            failedAssignments.Add($"Неверный формат даты у {employeeInfo.FullName}: {employeeInfo.BirthDate}");
+                            continue;
+                        }
+
+                        var employee = await _dbContext.EmployeesByDepartment
+                            .FirstOrDefaultAsync(p => p.full_name == employeeInfo.FullName &&
+                                                      p.birth_date.Date == parsedBirthDate.Date);
+
+                        if (employee == null)
+                        {
+                            failedAssignments.Add($"Сотрудник не найден: {employeeInfo.FullName}");
+                            continue;
+                        }
+
+                        var alreadyAssigned = await _dbContext.InstructionStatuses
+                            .AnyAsync(s => s.instruction_id == instruction.instruction_id &&
+                                           s.personnel_id == employee.personnel_id);
+
+                        if (alreadyAssigned)
+                        {
+                            failedAssignments.Add($"Уже назначен: {employeeInfo.FullName}");
+                            continue;
+                        }
+
+                        var instructionStatus = new InstructionStatus
+                        {
+                            instruction_id = instruction.instruction_id,
+                            personnel_id = employee.personnel_id,
+                            department_id = currentUser.department_id,
+                            is_instruction_passed = false,
+                            when_was_sent_to_user = DateTime.Now,
+                            when_was_sent_to_user_UTC = DateTime.UtcNow,
+                            was_signed_by_personnel_id = currentUser.personnel_id
+                        };
+
+                        _dbContext.InstructionStatuses.Add(instructionStatus);
+                        await _dbContext.SaveChangesAsync();
+
+                        if (package.NormativeInstructionNameIds?.Any() == true)
+                        {
+                            foreach (var normId in package.NormativeInstructionNameIds)
+                            {
+                                var normativeExists = await _dbContext.NormativeInstructionNames.AnyAsync(n => n.id == normId);
+                                if (!normativeExists)
+                                {
+                                    _logger.LogWarning($"Normative instruction ID {normId} not found.");
+                                    continue;
+                                }
+
+                                _dbContext.InstructionStatusToNormativeInstrNames.Add(new InstructionStatusToNormativeInstrName
+                                {
+                                    instruction_status_id = instructionStatus.id,
+                                    normative_instruction_name_id = normId
+                                });
+                            }
+                        }
+
+                        assignmentCount++;
+                    }
+
+                    if (assignmentCount > 0)
+                    {
+                        instruction.is_assigned_to_people = true;
+                        _dbContext.Instructions.Update(instruction);
+                        await _dbContext.SaveChangesAsync();
+                    }
+
+                    await transaction.CommitAsync();
+
+                    return Ok(new
+                    {
+                        Message = $"Назначено {assignmentCount} сотрудникам.",
+                        Total = package.SelectedEmployees.Count,
+                        Failed = failedAssignments,
+                        NormativeInstructionsAssigned = package.NormativeInstructionNameIds?.Count ?? 0
+                    });
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "Ошибка при назначении внепланового инструктажа.");
+                    return StatusCode(500, "Внутренняя ошибка сервера");
+                }
+            });
+        }
+
+
+
 
         /// <summary>
         /// Gets compliance data for instructions, showing who has passed each instruction.
@@ -2424,6 +2580,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     instruction.type_of_instruction,
                     instruction.is_assigned_to_people,
                     instruction.is_passed_by_everyone,
+                    instruction.is_passed_by_chief_unplanned_instr,
                     TypeName = instruction.InstructionType?.name_of_type_instruction,
                     FilePaths = instruction.FilePaths.Select(fp => fp.file_path).ToList()
                 };
@@ -2849,7 +3006,117 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+        /// <summary>
+        /// Retrieves predetermined normative instructions for a specific unplanned instruction.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint returns the normative instructions that were originally assigned to an unplanned instruction
+        /// when it was created by Management. These instructions will be automatically assigned to employees
+        /// when the chief assigns the unplanned instruction.
+        /// </remarks>
+        /// <param name="instructionId">The ID of the unplanned instruction</param>
+        /// <returns>
+        /// Returns a list of normative instructions associated with the unplanned instruction.
+        /// </returns>
+        /// <response code="200">The normative instructions were successfully retrieved.</response>
+        /// <response code="400">Bad request - Invalid instruction ID or instruction not found.</response>
+        /// <response code="401">Unauthorized - The user is not authenticated.</response>
+        /// <response code="403">Forbidden - The user does not have the required role.</response>
+        /// <response code="500">Internal server error occurred during retrieval.</response>
+        [HttpGet("get-normative-instructions-for-unplanned/{instructionId}")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
+        public async Task<IActionResult> GetNormativeInstructionsForUnplannedInstruction(int instructionId)
+        {
+            try
+            {
+                // Verify the instruction exists and is an unplanned instruction
+                var instruction = await _dbContext.Instructions
+                    .Include(i => i.InstructionType)
+                    .FirstOrDefaultAsync(i => i.instruction_id == instructionId);
 
+                if (instruction == null)
+                {
+                    return BadRequest($"Instruction with ID {instructionId} not found");
+                }
+
+                if (instruction.type_of_instruction != 1) // 1 = Unplanned instruction
+                {
+                    return BadRequest($"Instruction with ID {instructionId} is not an unplanned instruction");
+                }
+
+                // Get current user to verify department access
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId) || !int.TryParse(userId, out int userIdInt))
+                {
+                    return BadRequest("Invalid user ID");
+                }
+
+                var user = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .FirstOrDefaultAsync(u => u.id == userIdInt);
+
+                if (user == null)
+                {
+                    return BadRequest("User not found");
+                }
+
+                // Verify user has access to this instruction (same department)
+                if (instruction.department_id != user.department_id)
+                {
+                    return Forbid("You do not have access to this instruction");
+                }
+
+                // Find normative instructions that were originally assigned to chiefs for this unplanned instruction
+                // We look for instruction statuses where the instruction was assigned to chiefs and get their normative instructions
+                var normativeInstructions = await _dbContext.InstructionStatuses
+                    .Where(s => s.instruction_id == instructionId && s.department_id == user.department_id)
+                    .Include(s => s.NormativeInstructions)
+                        .ThenInclude(ni => ni.NormativeInstructionName)
+                    .SelectMany(s => s.NormativeInstructions)
+                    .Select(ni => ni.NormativeInstructionName)
+                    .Distinct()
+                    .Select(n => new
+                    {
+                        Id = n.id,
+                        Name = n.normative_instruction_name,
+                        Url = n.url,
+                        CreatedAt = n.created_at
+                    })
+                    .ToListAsync();
+
+                // If no normative instructions found through instruction statuses, 
+                // check if there are any marked as unplanned instructions
+                if (!normativeInstructions.Any())
+                {
+                    // Look for normative instructions that are marked as unplanned and created around the same time
+                    var instructionCreationDate = instruction.begin_date;
+                    var searchStartDate = instructionCreationDate.AddDays(-1);
+                    var searchEndDate = instructionCreationDate.AddDays(1);
+
+                    var unplannedNormatives = await _dbContext.NormativeInstructionNames
+                        .Where(n => n.is_unplanned_instruction &&
+                                   n.created_at >= searchStartDate &&
+                                   n.created_at <= searchEndDate)
+                        .Select(n => new
+                        {
+                            Id = n.id,
+                            Name = n.normative_instruction_name,
+                            Url = n.url,
+                            CreatedAt = n.created_at
+                        })
+                        .ToListAsync();
+
+                    normativeInstructions = unplannedNormatives;
+                }
+
+                return Ok(normativeInstructions);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error retrieving normative instructions for unplanned instruction {instructionId}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
 
 
 
@@ -2869,7 +3136,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         #endregion
-
         #region Manager stuff
 
         // Add these endpoints to your InstructionsController.cs class
