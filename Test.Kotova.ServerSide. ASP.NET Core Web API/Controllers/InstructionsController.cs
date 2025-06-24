@@ -1328,11 +1328,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <remarks>
         /// Returns chronologically ordered compliance data for a specific instruction,
         /// with employees who passed listed first (sorted by date), followed by those who didn't pass.
+        /// Now properly handles cross-department assignments from Management.
         /// </remarks>
         /// <param name="instructionId">The ID of the instruction to report on</param>
         /// <returns>A report with sorted employee compliance data</returns>
         [HttpGet("get-instruction-compliance-report/{instructionId}")]
-        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator")]
+        [Authorize(Roles = "ChiefOfDepartment, DeputyChief, Administrator, Management")]
         public async Task<IActionResult> GetInstructionComplianceReport(int instructionId)
         {
             try
@@ -1347,6 +1348,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 // Get user from database
                 var user = await _dbContext.Users
                     .Include(u => u.Department)
+                    .Include(u => u.Role)
                     .FirstOrDefaultAsync(u => u.id == userIdInt);
 
                 if (user == null)
@@ -1355,10 +1357,11 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
 
                 int departmentId = user.department_id;
+                string userRole = user.Role?.role_type ?? "";
 
-                // Get the specific instruction
+                // Get the specific instruction - check access permissions
                 var instruction = await _dbContext.Instructions
-                    .Where(i => i.instruction_id == instructionId && i.department_id == departmentId)
+                    .Where(i => i.instruction_id == instructionId)
                     .Include(i => i.InstructionType)
                     .FirstOrDefaultAsync();
 
@@ -1367,21 +1370,44 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     return NotFound($"Instruction with ID {instructionId} not found");
                 }
 
-                // Get all instruction statuses for this instruction
-                var statuses = await _dbContext.InstructionStatuses
-                    .Where(s => s.instruction_id == instructionId && s.department_id == departmentId)
-                    .Include(s => s.Personnel)
-                    .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
-                    .ToListAsync();
+                // Access control: 
+                // - Management can see all instructions
+                // - Chiefs/Deputies can only see instructions from their department
+                if (userRole != "Management" && userRole != "Administrator" && instruction.department_id != departmentId)
+                {
+                    return Forbid("You don't have access to this instruction");
+                }
+
+                // Get instruction statuses - different logic based on user role
+                List<InstructionStatus> statuses;
+
+                if (userRole == "Management" || userRole == "Administrator")
+                {
+                    // Management can see ALL statuses for this instruction across all departments
+                    statuses = await _dbContext.InstructionStatuses
+                        .Where(s => s.instruction_id == instructionId)
+                        .Include(s => s.Personnel)
+                        .ThenInclude(p => p.EmployeesByDepartment)
+                        .ToListAsync();
+                }
+                else
+                {
+                    // Chiefs/Deputies can only see statuses from their department
+                    statuses = await _dbContext.InstructionStatuses
+                        .Where(s => s.instruction_id == instructionId && s.department_id == departmentId)
+                        .Include(s => s.Personnel)
+                        .ThenInclude(p => p.EmployeesByDepartment.Where(e => e.department_id == departmentId))
+                        .ToListAsync();
+                }
 
                 // Create employee data
                 var employeeData = new List<object>();
 
                 foreach (var status in statuses)
                 {
-                    // Get employee info
+                    // Get employee info - for Management, we need to get the employee from the correct department
                     var employee = status.Personnel.EmployeesByDepartment
-                        .FirstOrDefault(e => e.department_id == departmentId);
+                        .FirstOrDefault(e => e.department_id == status.department_id);
 
                     if (employee != null)
                     {
@@ -1392,7 +1418,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             .Select(link => link.NormativeInstructionName.normative_instruction_name)
                             .ToListAsync();
 
-                        // Get the assigner's name and job position
+                        // Get the assigner's name and job position - FIXED VERSION
                         string assignerInfo = "Неизвестно";
                         if (status.was_signed_by_personnel_id > 0)
                         {
@@ -1403,16 +1429,26 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                             if (assigner != null)
                             {
-                                var assignerEmployee = assigner.EmployeesByDepartment
-                                    .FirstOrDefault(e => e.department_id == departmentId);
+                                // Try to find the assigner in any department (not just the current one)
+                                var assignerEmployee = assigner.EmployeesByDepartment.FirstOrDefault();
 
                                 if (assignerEmployee != null)
                                 {
-                                    // Combine name and job position
-                                    assignerInfo = $"{assignerEmployee.full_name} {assignerEmployee.job_position}";
+                                    // Get the department name for the assigner
+                                    var assignerDepartment = await _dbContext.Departments
+                                        .FirstOrDefaultAsync(d => d.department_id == assignerEmployee.department_id);
+
+                                    var departmentName = assignerDepartment?.department_name ?? "Неизвестный отдел";
+
+                                    // Include department info to distinguish Management from department chiefs
+                                    assignerInfo = $"{assignerEmployee.full_name} - {assignerEmployee.job_position} ({departmentName})";
                                 }
                             }
                         }
+
+                        // Get the department name for the current employee
+                        var employeeDepartment = await _dbContext.Departments
+                            .FirstOrDefaultAsync(d => d.department_id == employee.department_id);
 
                         employeeData.Add(new
                         {
@@ -1420,13 +1456,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             FullName = employee.full_name,
                             Position = employee.job_position,
                             BirthDate = employee.birth_date,
+                            Department = employeeDepartment?.department_name ?? "Неизвестный отдел",
 
                             // Instruction status information
                             HasPassed = status.is_instruction_passed,
                             DatePassed = status.date_when_passed,
                             DateAssigned = status.when_was_sent_to_user,
 
-                            // Assigner information
+                            // Assigner information - now properly shows Management assignments
                             AssignedBy = assignerInfo,
 
                             // Normative instruction names
@@ -1458,6 +1495,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     // Statistics
                     TotalEmployees = sortedEmployeeData.Count,
                     PassedCount = sortedEmployeeData.Count(e => (bool)((dynamic)e).HasPassed),
+
+                    // Show which user is viewing this report
+                    ViewedBy = $"{user.Role?.role_type} from {user.Department?.department_name}",
 
                     // Sorted employee data
                     EmployeeData = sortedEmployeeData
