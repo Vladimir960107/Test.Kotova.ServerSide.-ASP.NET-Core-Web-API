@@ -1,23 +1,24 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using DocumentFormat.OpenXml.InkML;
+using Kotova.CommonClasses;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
-using Kotova.CommonClasses;
 using Task = System.Threading.Tasks.Task;
-using System.Globalization;
-using Microsoft.EntityFrameworkCore.Storage;
-using System.ComponentModel.DataAnnotations;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
@@ -78,6 +79,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 TypeName = await GetInstructionTypeNameAsync(instruction.type_of_instruction)
             };
         }
+
+
+
+
         #region UserRegion
 
         /// <summary>
@@ -3581,5 +3586,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         #endregion
 
         #endregion
+
     }
 }

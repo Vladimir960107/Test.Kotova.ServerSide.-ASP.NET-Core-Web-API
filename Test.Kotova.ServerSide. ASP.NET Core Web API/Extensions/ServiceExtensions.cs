@@ -3,13 +3,14 @@ using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
 {
     public static class ServiceExtensions
     {
+        /// <summary>
+        /// Configures the Lynks database context
+        /// </summary>
         public static IServiceCollection ConfigureLynksDbContext(
             this IServiceCollection services,
             IConfiguration configuration)
@@ -29,12 +30,162 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
             return services;
         }
 
+        /// <summary>
+        /// Configures the TransElectro (TELP) database context
+        /// </summary>
+        public static IServiceCollection ConfigureTransElectroDbContext(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            services.AddDbContext<TransElectroDbContext>(options =>
+                options.UseSqlServer(
+                    configuration.GetConnectionString("TransElectroDBConnection"),
+                    sqlOptions =>
+                    {
+                        sqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 5,
+                            maxRetryDelay: TimeSpan.FromSeconds(30),
+                            errorNumbersToAdd: null);
+
+                        // Set command timeout for potentially large data operations
+                        sqlOptions.CommandTimeout(120);
+                    }
+                ));
+
+            return services;
+        }
+
+        /// <summary>
+        /// Configures the Lynks database service
+        /// </summary>
         public static IServiceCollection ConfigureLynksDbService(
             this IServiceCollection services)
         {
             services.AddScoped<ILynksDbService, LynksDbService>();
+            return services;
+        }
+
+        /// <summary>
+        /// Configures the database comparison service
+        /// </summary>
+        public static IServiceCollection ConfigureDatabaseComparisonService(
+            this IServiceCollection services)
+        {
+            services.AddScoped<IDatabaseComparisonService, DatabaseComparisonService>();
+            return services;
+        }
+
+        /// <summary>
+        /// Configures all database-related services
+        /// </summary>
+        public static IServiceCollection ConfigureAllDatabaseServices(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            // Configure both database contexts
+            services.ConfigureLynksDbContext(configuration);
+            services.ConfigureTransElectroDbContext(configuration);
+
+            // Configure services
+            services.ConfigureLynksDbService();
+            services.ConfigureDatabaseComparisonService();
 
             return services;
+        }
+
+        /// <summary>
+        /// Ensures both databases are available (without creating/migrating since TELP DB already exists)
+        /// </summary>
+        public static async Task<IServiceProvider> EnsureDatabasesAvailableAsync(this IServiceProvider serviceProvider)
+        {
+            using var scope = serviceProvider.CreateScope();
+
+            try
+            {
+                // Test Lynks database connection and ensure it's created
+                var lynksContext = scope.ServiceProvider.GetRequiredService<LynksDbContext>();
+                await lynksContext.Database.EnsureCreatedAsync();
+
+                // Apply any pending migrations for Lynks
+                if ((await lynksContext.Database.GetPendingMigrationsAsync()).Any())
+                {
+                    await lynksContext.Database.MigrateAsync();
+                }
+
+                // Test TransElectro database connection (don't create - it already exists)
+                var telpContext = scope.ServiceProvider.GetRequiredService<TransElectroDbContext>();
+
+                // Just test the connection by trying to access the database
+                await telpContext.Database.CanConnectAsync();
+
+                var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
+                logger?.LogInformation("Both database connections verified successfully");
+            }
+            catch (Exception ex)
+            {
+                var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
+                logger?.LogError(ex, "Error verifying database connections");
+                throw;
+            }
+
+            return serviceProvider;
+        }
+
+        /// <summary>
+        /// Creates sync log table in TELP database if it doesn't exist
+        /// </summary>
+        public static async Task<IServiceProvider> EnsureSyncLogTableAsync(this IServiceProvider serviceProvider)
+        {
+            using var scope = serviceProvider.CreateScope();
+
+            try
+            {
+                var telpContext = scope.ServiceProvider.GetRequiredService<TransElectroDbContext>();
+
+                // Check if DataSyncLog table exists, if not create it
+                var tableName = "DataSyncLog";
+                var schemaName = "dbo";
+
+                var tableExists = await telpContext.Database.SqlQueryRaw<int>(
+                    $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{schemaName}' AND TABLE_NAME = '{tableName}'")
+                    .FirstOrDefaultAsync();
+
+                if (tableExists == 0)
+                {
+                    // Create the DataSyncLog table
+                    var createTableSql = @"
+                        CREATE TABLE [dbo].[DataSyncLog] (
+                            [Id] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                            [SyncType] nvarchar(100) NOT NULL,
+                            [EntityId] nvarchar(100) NULL,
+                            [Operation] nvarchar(50) NOT NULL,
+                            [OldValues] nvarchar(max) NULL,
+                            [NewValues] nvarchar(max) NULL,
+                            [SyncDate] datetime2 NOT NULL DEFAULT GETUTCDATE(),
+                            [SyncedBy] nvarchar(255) NULL,
+                            [IsSuccessful] bit NOT NULL DEFAULT 1,
+                            [ErrorMessage] nvarchar(1000) NULL
+                        );
+                        
+                        CREATE INDEX [IX_DataSyncLog_SyncType] ON [dbo].[DataSyncLog] ([SyncType]);
+                        CREATE INDEX [IX_DataSyncLog_SyncDate] ON [dbo].[DataSyncLog] ([SyncDate]);
+                        CREATE INDEX [IX_DataSyncLog_IsSuccessful] ON [dbo].[DataSyncLog] ([IsSuccessful]);
+                        CREATE INDEX [IX_DataSyncLog_SyncType_EntityId] ON [dbo].[DataSyncLog] ([SyncType], [EntityId]);";
+
+                    await telpContext.Database.ExecuteSqlRawAsync(createTableSql);
+
+                    var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
+                    logger?.LogInformation("DataSyncLog table created successfully in TELP database");
+                }
+            }
+            catch (Exception ex)
+            {
+                var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
+                logger?.LogError(ex, "Error creating DataSyncLog table in TELP database");
+                throw;
+            }
+
+            return serviceProvider;
         }
     }
 }
