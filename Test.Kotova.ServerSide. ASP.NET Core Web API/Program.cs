@@ -189,7 +189,7 @@ builder.Services.AddScoped<MyDataService>();
 var app = builder.Build();
 
 
-try
+try 
 {
     await app.Services.EnsureDatabasesAvailableAsync();
 }
