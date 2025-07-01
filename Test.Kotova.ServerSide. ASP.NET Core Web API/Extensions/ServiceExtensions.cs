@@ -66,16 +66,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
         }
 
         /// <summary>
-        /// Configures the database comparison service
-        /// </summary>
-        public static IServiceCollection ConfigureDatabaseComparisonService(
-            this IServiceCollection services)
-        {
-            services.AddScoped<IDatabaseComparisonService, DatabaseComparisonService>();
-            return services;
-        }
-
-        /// <summary>
         /// Configures all database-related services
         /// </summary>
         public static IServiceCollection ConfigureAllDatabaseServices(
@@ -88,7 +78,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
 
             // Configure services
             services.ConfigureLynksDbService();
-            services.ConfigureDatabaseComparisonService();
 
             return services;
         }
@@ -102,7 +91,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
 
             try
             {
-                // Test Lynks database connection and ensure it's created
+                // Test and setup Lynks database (you have full rights here)
                 var lynksContext = scope.ServiceProvider.GetRequiredService<LynksDbContext>();
                 await lynksContext.Database.EnsureCreatedAsync();
 
@@ -112,14 +101,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
                     await lynksContext.Database.MigrateAsync();
                 }
 
-                // Test TransElectro database connection (don't create - it already exists)
+                // ONLY test TransElectro database connection (read-only)
                 var telpContext = scope.ServiceProvider.GetRequiredService<TransElectroDbContext>();
-
-                // Just test the connection by trying to access the database
                 await telpContext.Database.CanConnectAsync();
 
                 var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
-                logger?.LogInformation("Both database connections verified successfully");
+                logger?.LogInformation("Database connections verified successfully");
             }
             catch (Exception ex)
             {
@@ -134,58 +121,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
         /// <summary>
         /// Creates sync log table in TELP database if it doesn't exist
         /// </summary>
-        public static async Task<IServiceProvider> EnsureSyncLogTableAsync(this IServiceProvider serviceProvider)
-        {
-            using var scope = serviceProvider.CreateScope();
-
-            try
-            {
-                var telpContext = scope.ServiceProvider.GetRequiredService<TransElectroDbContext>();
-
-                // Check if DataSyncLog table exists, if not create it
-                var tableName = "DataSyncLog";
-                var schemaName = "dbo";
-
-                var tableExists = await telpContext.Database.SqlQueryRaw<int>(
-                    $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{schemaName}' AND TABLE_NAME = '{tableName}'")
-                    .FirstOrDefaultAsync();
-
-                if (tableExists == 0)
-                {
-                    // Create the DataSyncLog table
-                    var createTableSql = @"
-                        CREATE TABLE [dbo].[DataSyncLog] (
-                            [Id] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                            [SyncType] nvarchar(100) NOT NULL,
-                            [EntityId] nvarchar(100) NULL,
-                            [Operation] nvarchar(50) NOT NULL,
-                            [OldValues] nvarchar(max) NULL,
-                            [NewValues] nvarchar(max) NULL,
-                            [SyncDate] datetime2 NOT NULL DEFAULT GETUTCDATE(),
-                            [SyncedBy] nvarchar(255) NULL,
-                            [IsSuccessful] bit NOT NULL DEFAULT 1,
-                            [ErrorMessage] nvarchar(1000) NULL
-                        );
-                        
-                        CREATE INDEX [IX_DataSyncLog_SyncType] ON [dbo].[DataSyncLog] ([SyncType]);
-                        CREATE INDEX [IX_DataSyncLog_SyncDate] ON [dbo].[DataSyncLog] ([SyncDate]);
-                        CREATE INDEX [IX_DataSyncLog_IsSuccessful] ON [dbo].[DataSyncLog] ([IsSuccessful]);
-                        CREATE INDEX [IX_DataSyncLog_SyncType_EntityId] ON [dbo].[DataSyncLog] ([SyncType], [EntityId]);";
-
-                    await telpContext.Database.ExecuteSqlRawAsync(createTableSql);
-
-                    var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
-                    logger?.LogInformation("DataSyncLog table created successfully in TELP database");
-                }
-            }
-            catch (Exception ex)
-            {
-                var logger = scope.ServiceProvider.GetService<ILogger<IServiceProvider>>();
-                logger?.LogError(ex, "Error creating DataSyncLog table in TELP database");
-                throw;
-            }
-
-            return serviceProvider;
-        }
+        
     }
 }

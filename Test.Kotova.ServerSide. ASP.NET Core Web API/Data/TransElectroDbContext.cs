@@ -17,7 +17,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
         public DbSet<TelpDepartment> Departments { get; set; }
         public DbSet<TelpPosition> Positions { get; set; }
         public DbSet<TelpEmployee> Employees { get; set; }
-        public DbSet<TelpDataSyncLog> DataSyncLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -110,27 +109,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 entity.HasIndex(e => e.IsHidden);
             });
 
-            // Configure TelpDataSyncLog (our custom sync log table)
-            modelBuilder.Entity<TelpDataSyncLog>(entity =>
-            {
-                entity.ToTable("DataSyncLog", "dbo");
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.SyncType).IsRequired().HasMaxLength(100);
-                entity.Property(e => e.EntityId).HasMaxLength(100);
-                entity.Property(e => e.Operation).IsRequired().HasMaxLength(50);
-                entity.Property(e => e.OldValues).HasColumnType("nvarchar(max)");
-                entity.Property(e => e.NewValues).HasColumnType("nvarchar(max)");
-                entity.Property(e => e.SyncedBy).HasMaxLength(255);
-                entity.Property(e => e.ErrorMessage).HasMaxLength(1000);
-                entity.Property(e => e.SyncDate).HasDefaultValueSql("GETUTCDATE()");
-                entity.Property(e => e.IsSuccessful).HasDefaultValue(true);
-
-                // Indexes for reporting and monitoring
-                entity.HasIndex(e => e.SyncType);
-                entity.HasIndex(e => e.SyncDate);
-                entity.HasIndex(e => e.IsSuccessful);
-                entity.HasIndex(e => new { e.SyncType, e.EntityId });
-            });
         }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

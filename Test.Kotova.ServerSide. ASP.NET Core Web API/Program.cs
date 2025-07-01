@@ -39,6 +39,7 @@ builder.Host.UseSerilog();
 
 // Configure DbContext and DbService using extension methods
 builder.Services.ConfigureLynksDbContext(builder.Configuration);
+builder.Services.ConfigureTransElectroDbContext(builder.Configuration);
 builder.Services.ConfigureLynksDbService();
 
 builder.Services.AddControllers()
@@ -186,6 +187,19 @@ builder.Services.AddScoped<NotificationsService>();
 builder.Services.AddScoped<MyDataService>();
 
 var app = builder.Build();
+
+
+try
+{
+    await app.Services.EnsureDatabasesAvailableAsync();
+}
+catch (Exception ex)
+{
+    Log.Error(ex, "Failed to initialize databases");
+    // Decide if you want to continue or stop the application
+}
+
+
 
 if (app.Environment.IsDevelopment())
 {

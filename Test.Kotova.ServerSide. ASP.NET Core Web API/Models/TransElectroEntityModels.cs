@@ -167,39 +167,4 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
         [ForeignKey("PositionCode")]
         public virtual TelpPosition? Position { get; set; }
     }
-
-    // Additional entity for tracking data synchronization (custom table for our needs)
-    [Table("DataSyncLog", Schema = "dbo")]
-    public class TelpDataSyncLog
-    {
-        [Key]
-        public int Id { get; set; }
-
-        [Required]
-        [StringLength(100)]
-        public string SyncType { get; set; } = string.Empty; // Employee, Department, Position
-
-        [StringLength(100)]
-        public string? EntityId { get; set; }
-
-        [Required]
-        [StringLength(50)]
-        public string Operation { get; set; } = string.Empty; // Create, Update, Delete
-
-        [Column(TypeName = "nvarchar(max)")]
-        public string? OldValues { get; set; }
-
-        [Column(TypeName = "nvarchar(max)")]
-        public string? NewValues { get; set; }
-
-        public DateTime SyncDate { get; set; } = DateTime.UtcNow;
-
-        [StringLength(255)]
-        public string? SyncedBy { get; set; }
-
-        public bool IsSuccessful { get; set; } = true;
-
-        [StringLength(1000)]
-        public string? ErrorMessage { get; set; }
-    }
 }
