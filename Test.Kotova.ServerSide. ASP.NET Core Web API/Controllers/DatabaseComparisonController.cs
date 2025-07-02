@@ -31,14 +31,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         /// <summary>
-        /// Gets all employees from LynksDatabase with differences highlighted
+        /// Gets all employees from both databases with color-coded differences
         /// </summary>
         /// <remarks>
-        /// This endpoint returns all employees from the Lynks database and marks those
-        /// that have differences with the TransElectro database. Red rows should be
-        /// displayed for employees with differences.
+        /// Color coding logic:
+        /// - Red: Employees exist in both databases but have data differences
+        /// - Green: Employees exist in both databases with identical data
+        /// - Blue: Employees exist only in Lynks database (not in TransElectro)
+        /// - Yellow: Employees exist only in TransElectro database (not in Lynks) - "Так не должно было быть"
         /// </remarks>
-        /// <returns>List of employees with difference indicators</returns>
+        /// <returns>List of employees with color indicators</returns>
         /// <response code="200">Successfully retrieved employee comparison data</response>
         /// <response code="401">Unauthorized - user not authenticated</response>
         /// <response code="500">Internal server error</response>
@@ -70,6 +72,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 var comparisonResults = new List<EmployeeComparisonDto>();
 
+                // Process employees from Lynks database
                 foreach (var lynksEmployee in lynksEmployees)
                 {
                     var personnelNumber = lynksEmployee.Personnel?.personnel_number;
@@ -86,7 +89,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         FullName = lynksEmployee.full_name,
                         DepartmentName = lynksEmployee.Department?.department_name ?? "Unknown",
                         PositionName = lynksEmployee.job_position,
-                        Email = "", // Lynks doesn't have email field in EmployeeByDepartment
+                        Email = "", // Will be populated from Users table if needed
                         HasDifferences = false,
                         DifferenceFields = new List<string>(),
                         LynksData = new TelpEmployeeDto
@@ -101,10 +104,24 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                     if (transElectroEmployee != null)
                     {
-                        // Compare the data and identify differences
+                        // Employee exists in both databases - check for differences
                         var differences = CompareEmployeeData(lynksEmployee, transElectroEmployee);
-                        comparisonDto.HasDifferences = differences.Any();
-                        comparisonDto.DifferenceFields = differences;
+
+                        if (differences.Any())
+                        {
+                            // RED: Has differences between databases
+                            comparisonDto.HasDifferences = true;
+                            comparisonDto.DifferenceFields = differences;
+                            comparisonDto.RowColor = "Red";
+                            comparisonDto.StatusMessage = "Есть различия в данных";
+                        }
+                        else
+                        {
+                            // GREEN: No differences - everything is the same
+                            comparisonDto.HasDifferences = false;
+                            comparisonDto.RowColor = "Green";
+                            comparisonDto.StatusMessage = "Данные идентичны";
+                        }
 
                         comparisonDto.TransElectroData = new TransElectroEmployeeDto
                         {
@@ -117,11 +134,50 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     }
                     else
                     {
-                        // Employee exists in Lynks but not in TransElectro
+                        // BLUE: Employee exists in Lynks but not in TransElectro
                         comparisonDto.HasDifferences = true;
                         comparisonDto.DifferenceFields.Add("Employee not found in TransElectro database");
                         comparisonDto.TransElectroData = null;
+                        comparisonDto.RowColor = "Blue";
+                        comparisonDto.StatusMessage = "Есть только в базе Lynks";
                     }
+
+                    comparisonResults.Add(comparisonDto);
+                }
+
+                // Process employees that exist only in TransElectro database
+                foreach (var transElectroEmployee in transElectroEmployees)
+                {
+                    var personnelNumber = transElectroEmployee.PersonnelNumber;
+                    if (string.IsNullOrEmpty(personnelNumber))
+                        continue;
+
+                    // Check if this employee already processed (exists in Lynks)
+                    if (comparisonResults.Any(cr => cr.PersonnelNumber == personnelNumber))
+                        continue;
+
+                    // YELLOW: Employee exists only in TransElectro - this shouldn't happen
+                    var comparisonDto = new EmployeeComparisonDto
+                    {
+                        PersonnelNumber = personnelNumber,
+                        FullName = transElectroEmployee.FullName,
+                        DepartmentName = transElectroEmployee.Department?.Name ?? "Unknown",
+                        PositionName = transElectroEmployee.Position?.Name ?? "Unknown",
+                        Email = transElectroEmployee.Email ?? "",
+                        HasDifferences = true,
+                        DifferenceFields = new List<string> { "Employee found only in TransElectro database" },
+                        LynksData = null,
+                        TransElectroData = new TransElectroEmployeeDto
+                        {
+                            FullName = transElectroEmployee.FullName,
+                            DepartmentName = transElectroEmployee.Department?.Name ?? "Unknown",
+                            PositionName = transElectroEmployee.Position?.Name ?? "Unknown",
+                            Email = transElectroEmployee.Email ?? "",
+                            PersonnelNumber = transElectroEmployee.PersonnelNumber ?? ""
+                        },
+                        RowColor = "Yellow",
+                        StatusMessage = "Так не должно было быть - есть только в базе TransElectro"
+                    };
 
                     comparisonResults.Add(comparisonDto);
                 }
@@ -141,17 +197,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <summary>
         /// Gets detailed comparison data for a specific employee
         /// </summary>
-        /// <remarks>
-        /// This endpoint returns detailed comparison data for a specific employee
-        /// identified by personnel number. Used when double-clicking on a row
-        /// to show the detailed comparison form.
-        /// </remarks>
-        /// <param name="personnelNumber">The personnel number of the employee</param>
-        /// <returns>Detailed comparison data for the employee</returns>
-        /// <response code="200">Successfully retrieved detailed comparison data</response>
-        /// <response code="404">Employee not found</response>
-        /// <response code="401">Unauthorized - user not authenticated</response>
-        /// <response code="500">Internal server error</response>
         [HttpGet("employee-details/{personnelNumber}")]
         [Authorize(Roles = "Administrator, Coordinator")]
         public async Task<ActionResult<EmployeeComparisonDto>> GetEmployeeComparisonDetails(string personnelNumber)
@@ -166,44 +211,46 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     .Include(e => e.Department)
                     .FirstOrDefaultAsync(e => e.Personnel.personnel_number == personnelNumber);
 
-                if (lynksEmployee == null)
-                {
-                    return NotFound($"Employee with personnel number {personnelNumber} not found in Lynks database");
-                }
-
                 // Get corresponding employee from TransElectro database
                 var transElectroEmployee = await _transElectroDbContext.Employees
                     .Include(e => e.Department)
                     .Include(e => e.Position)
                     .FirstOrDefaultAsync(e => e.PersonnelNumber == personnelNumber);
 
-                // Get user data from Lynks database for email
-                var lynksUser = await _lynksDbContext.Users
-                    .FirstOrDefaultAsync(u => u.personnel_id == lynksEmployee.personnel_id);
+                // If neither database has the employee, return not found
+                if (lynksEmployee == null && transElectroEmployee == null)
+                {
+                    return NotFound($"Employee with personnel number {personnelNumber} not found in either database");
+                }
 
                 var detailedComparison = new EmployeeComparisonDto
                 {
-                    PersonnelNumber = personnelNumber,
-                    FullName = lynksEmployee.full_name,
-                    DepartmentName = lynksEmployee.Department?.department_name ?? "Unknown",
-                    PositionName = lynksEmployee.job_position,
-                    Email = lynksUser?.current_email ?? "",
-                    LynksData = new TelpEmployeeDto
+                    PersonnelNumber = personnelNumber
+                };
+
+                if (lynksEmployee != null)
+                {
+                    // Get user data from Lynks database for email
+                    var lynksUser = await _lynksDbContext.Users
+                        .FirstOrDefaultAsync(u => u.personnel_id == lynksEmployee.personnel_id);
+
+                    detailedComparison.FullName = lynksEmployee.full_name;
+                    detailedComparison.DepartmentName = lynksEmployee.Department?.department_name ?? "Unknown";
+                    detailedComparison.PositionName = lynksEmployee.job_position;
+                    detailedComparison.Email = lynksUser?.current_email ?? "";
+
+                    detailedComparison.LynksData = new TelpEmployeeDto
                     {
                         FullName = lynksEmployee.full_name,
                         DepartmentName = lynksEmployee.Department?.department_name ?? "Unknown",
                         PositionName = lynksEmployee.job_position,
                         Email = lynksUser?.current_email ?? "",
                         PersonnelNumber = personnelNumber
-                    }
-                };
+                    };
+                }
 
                 if (transElectroEmployee != null)
                 {
-                    var differences = CompareEmployeeData(lynksEmployee, transElectroEmployee);
-                    detailedComparison.HasDifferences = differences.Any();
-                    detailedComparison.DifferenceFields = differences;
-
                     detailedComparison.TransElectroData = new TransElectroEmployeeDto
                     {
                         FullName = transElectroEmployee.FullName,
@@ -212,12 +259,51 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         Email = transElectroEmployee.Email ?? "",
                         PersonnelNumber = transElectroEmployee.PersonnelNumber ?? ""
                     };
+
+                    // If we don't have Lynks data, use TransElectro data for basic info
+                    if (lynksEmployee == null)
+                    {
+                        detailedComparison.FullName = transElectroEmployee.FullName;
+                        detailedComparison.DepartmentName = transElectroEmployee.Department?.Name ?? "Unknown";
+                        detailedComparison.PositionName = transElectroEmployee.Position?.Name ?? "Unknown";
+                        detailedComparison.Email = transElectroEmployee.Email ?? "";
+                    }
                 }
-                else
+
+                // Apply color logic
+                if (lynksEmployee != null && transElectroEmployee != null)
                 {
+                    // Both exist - check differences
+                    var differences = CompareEmployeeData(lynksEmployee, transElectroEmployee);
+                    if (differences.Any())
+                    {
+                        detailedComparison.HasDifferences = true;
+                        detailedComparison.DifferenceFields = differences;
+                        detailedComparison.RowColor = "Red";
+                        detailedComparison.StatusMessage = "Есть различия в данных";
+                    }
+                    else
+                    {
+                        detailedComparison.HasDifferences = false;
+                        detailedComparison.RowColor = "Green";
+                        detailedComparison.StatusMessage = "Данные идентичны";
+                    }
+                }
+                else if (lynksEmployee != null && transElectroEmployee == null)
+                {
+                    // Only in Lynks
                     detailedComparison.HasDifferences = true;
                     detailedComparison.DifferenceFields = new List<string> { "Employee not found in TransElectro database" };
-                    detailedComparison.TransElectroData = null;
+                    detailedComparison.RowColor = "Blue";
+                    detailedComparison.StatusMessage = "Есть только в базе Lynks";
+                }
+                else if (lynksEmployee == null && transElectroEmployee != null)
+                {
+                    // Only in TransElectro
+                    detailedComparison.HasDifferences = true;
+                    detailedComparison.DifferenceFields = new List<string> { "Employee found only in TransElectro database" };
+                    detailedComparison.RowColor = "Yellow";
+                    detailedComparison.StatusMessage = "Так не должно было быть - есть только в базе TransElectro";
                 }
 
                 return Ok(detailedComparison);
@@ -232,21 +318,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <summary>
         /// Gets comparison statistics between the two databases
         /// </summary>
-        /// <remarks>
-        /// This endpoint returns statistical information about differences
-        /// between the two databases, useful for dashboard displays.
-        /// </remarks>
-        /// <returns>Database comparison statistics</returns>
-        /// <response code="200">Successfully retrieved comparison statistics</response>
-        /// <response code="401">Unauthorized - user not authenticated</response>
-        /// <response code="500">Internal server error</response>
-        [HttpGet("comparison-statistics")]
+        [HttpGet("statistics")]
         [Authorize(Roles = "Administrator, Coordinator")]
         public async Task<ActionResult<object>> GetComparisonStatistics()
         {
             try
             {
-                _logger.LogInformation("Getting database comparison statistics");
+                _logger.LogInformation("Getting comparison statistics");
 
                 var lynksEmployeeCount = await _lynksDbContext.EmployeesByDepartment
                     .Where(e => e.is_working_in_department)
@@ -256,17 +334,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     .Where(e => !e.IsHidden.HasValue || !e.IsHidden.Value)
                     .CountAsync();
 
-                // Get employees with personnel numbers from both databases
                 var lynksPersonnelNumbers = await _lynksDbContext.EmployeesByDepartment
-                    .Include(e => e.Personnel)
-                    .Where(e => e.is_working_in_department && e.Personnel.personnel_number != null)
+                    .Where(e => e.is_working_in_department)
                     .Select(e => e.Personnel.personnel_number)
+                    .Where(pn => !string.IsNullOrEmpty(pn))
                     .ToListAsync();
 
                 var transElectroPersonnelNumbers = await _transElectroDbContext.Employees
-                    .Where(e => (!e.IsHidden.HasValue || !e.IsHidden.Value) &&
-                               e.PersonnelNumber != null)
+                    .Where(e => !e.IsHidden.HasValue || !e.IsHidden.Value)
                     .Select(e => e.PersonnelNumber)
+                    .Where(pn => !string.IsNullOrEmpty(pn))
                     .ToListAsync();
 
                 var commonPersonnelNumbers = lynksPersonnelNumbers.Intersect(transElectroPersonnelNumbers).Count();
@@ -278,9 +355,16 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     LynksEmployeeCount = lynksEmployeeCount,
                     TransElectroEmployeeCount = transElectroEmployeeCount,
                     CommonEmployees = commonPersonnelNumbers,
-                    OnlyInLynks = onlyInLynks,
-                    OnlyInTransElectro = onlyInTransElectro,
-                    ComparisonDate = DateTime.UtcNow
+                    OnlyInLynks = onlyInLynks,  // Blue rows
+                    OnlyInTransElectro = onlyInTransElectro,  // Yellow rows
+                    ComparisonDate = DateTime.UtcNow,
+                    ColorCoding = new
+                    {
+                        Green = "Данные идентичны в обеих базах",
+                        Red = "Есть различия в данных",
+                        Blue = "Есть только в базе Lynks",
+                        Yellow = "Так не должно было быть - есть только в базе TransElectro"
+                    }
                 };
 
                 return Ok(statistics);
@@ -295,17 +379,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// <summary>
         /// Synchronizes data from TransElectro to Lynks database (for future implementation)
         /// </summary>
-        /// <remarks>
-        /// This endpoint will be used to resolve differences by updating Lynks database
-        /// with data from TransElectro database. This is a placeholder for future implementation.
-        /// </remarks>
-        /// <param name="personnelNumber">Personnel number of employee to synchronize</param>
-        /// <param name="syncRequest">Synchronization request details</param>
-        /// <returns>Result of synchronization operation</returns>
-        /// <response code="200">Successfully synchronized employee data</response>
-        /// <response code="404">Employee not found</response>
-        /// <response code="401">Unauthorized - user not authenticated</response>
-        /// <response code="500">Internal server error</response>
         [HttpPost("synchronize-employee/{personnelNumber}")]
         [Authorize(Roles = "Administrator")]
         public async Task<ActionResult<object>> SynchronizeEmployee(
