@@ -380,7 +380,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         /// Synchronizes data from TransElectro to Lynks database (for future implementation)
         /// </summary>
         [HttpPost("synchronize-employee/{personnelNumber}")]
-        [Authorize(Roles = "Administrator")]
+        [Authorize(Roles = "Administrator, Coordinator")]
         public async Task<ActionResult<object>> SynchronizeEmployee(
             string personnelNumber,
             [FromBody] EmployeeSyncRequest syncRequest)
