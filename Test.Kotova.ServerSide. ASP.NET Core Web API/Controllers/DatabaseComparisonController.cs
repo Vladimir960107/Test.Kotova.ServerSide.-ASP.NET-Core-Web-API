@@ -377,7 +377,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         }
 
         /// <summary>
-        /// Synchronizes data from TransElectro to Lynks database (for future implementation)
+        /// Synchronizes employee data from TransElectro to Lynks database
         /// </summary>
         [HttpPost("synchronize-employee/{personnelNumber}")]
         [Authorize(Roles = "Administrator, Coordinator")]
@@ -387,23 +387,177 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                _logger.LogInformation($"Synchronizing employee: {personnelNumber}");
+                _logger.LogInformation($"Starting synchronization for employee: {personnelNumber}");
 
-                // TODO: Implement synchronization logic
-                // This is a placeholder for future implementation
+                // Step 1: Get employee from TransElectro database
+                var transElectroEmployee = await _transElectroDbContext.Employees
+                    .Include(e => e.Department)
+                    .Include(e => e.Position)
+                    .FirstOrDefaultAsync(e => e.PersonnelNumber == personnelNumber);
 
+                if (transElectroEmployee == null)
+                {
+                    _logger.LogWarning($"Employee {personnelNumber} not found in TransElectro database");
+                    return BadRequest(new
+                    {
+                        Success = false,
+                        Message = $"Employee with personnel number {personnelNumber} not found in TransElectro database",
+                        PersonnelNumber = personnelNumber
+                    });
+                }
+
+                // Step 2: Get employee from LYNKS database
+                var lynksEmployee = await _lynksDbContext.EmployeesByDepartment
+                    .Include(e => e.Personnel)
+                    .Include(e => e.Department)
+                    .FirstOrDefaultAsync(e => e.Personnel.personnel_number == personnelNumber);
+
+                if (lynksEmployee == null)
+                {
+                    _logger.LogWarning($"Employee {personnelNumber} not found in LYNKS database");
+                    return BadRequest(new
+                    {
+                        Success = false,
+                        Message = $"Employee with personnel number {personnelNumber} not found in LYNKS database. Cannot sync to non-existing employee.",
+                        PersonnelNumber = personnelNumber
+                    });
+                }
+
+                // Step 3: Validate department from TransElectro exists in LYNKS (mandatory check)
+                int? lynksDepartmentId = null;
+
+                if (!string.IsNullOrEmpty(transElectroEmployee.Department?.Name))
+                {
+                    var lynksDepartment = await _lynksDbContext.Departments
+                        .FirstOrDefaultAsync(d => d.department_name.Trim().ToLower() ==
+                                            transElectroEmployee.Department.Name.Trim().ToLower());
+
+                    if (lynksDepartment != null)
+                    {
+                        lynksDepartmentId = lynksDepartment.department_id;
+                        _logger.LogInformation($"Department '{transElectroEmployee.Department.Name}' found in LYNKS");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Department '{transElectroEmployee.Department.Name}' not found in LYNKS database");
+                        return BadRequest(new
+                        {
+                            Success = false,
+                            Message = $"Синхронизация не выполнена: отдел '{transElectroEmployee.Department.Name}' не существует в базе данных LYNKS",
+                            PersonnelNumber = personnelNumber,
+                            ErrorType = "DepartmentNotFound",
+                            MissingDepartment = transElectroEmployee.Department.Name,
+                            DetailedMessage = "Для выполнения синхронизации отдел должен существовать в системе LYNKS. Обратитесь к администратору для создания отдела."
+                        });
+                    }
+                }
+
+                // Step 4: Prepare sync results (all fields will be synced)
+                var syncResults = new List<string>();
+
+                // Step 5: Sync ФИО (Full Name) - Always sync
+                if (!string.IsNullOrEmpty(transElectroEmployee.FullName))
+                {
+                    lynksEmployee.full_name = transElectroEmployee.FullName.Trim();
+                    syncResults.Add("ФИО (Full Name)");
+                }
+
+                // Step 6: Sync Должность (Position) - Always sync
+                if (!string.IsNullOrEmpty(transElectroEmployee.Position?.Name))
+                {
+                    lynksEmployee.job_position = transElectroEmployee.Position.Name.Trim();
+                    syncResults.Add("Должность (Position)");
+                }
+
+                // Step 7: Sync Email - Always sync
+                if (!string.IsNullOrEmpty(transElectroEmployee.Email))
+                {
+                    // Get user record for email sync
+                    var lynksUser = await _lynksDbContext.Users
+                        .FirstOrDefaultAsync(u => u.personnel_id == lynksEmployee.personnel_id);
+
+                    if (lynksUser != null)
+                    {
+                        lynksUser.current_email = transElectroEmployee.Email.Trim();
+                        syncResults.Add("Email");
+                    }
+                    else
+                    {
+                        _logger.LogError($"User record not found for employee {personnelNumber}");
+                        return BadRequest(new
+                        {
+                            Success = false,
+                            Message = $"Cannot sync employee {personnelNumber}: User record not found in LYNKS database",
+                            PersonnelNumber = personnelNumber
+                        });
+                    }
+                }
+
+                // Step 8: Sync Отдел (Department) - Handle composite key constraint
+                if (lynksDepartmentId.HasValue && lynksEmployee.department_id != lynksDepartmentId.Value)
+                {
+                    // If department is changing, we need to handle the composite key carefully
+                    // Since department_id is part of primary key, we need to remove old and add new record
+
+                    _logger.LogInformation($"Department changing from {lynksEmployee.department_id} to {lynksDepartmentId.Value}");
+
+                    // Create new employee record with new department
+                    var newEmployeeRecord = new EmployeeByDepartment
+                    {
+                        personnel_id = lynksEmployee.personnel_id,
+                        department_id = lynksDepartmentId.Value,
+                        full_name = transElectroEmployee.FullName?.Trim() ?? lynksEmployee.full_name,
+                        job_position = transElectroEmployee.Position?.Name?.Trim() ?? lynksEmployee.job_position,
+                        group = lynksEmployee.group,
+                        birth_date = lynksEmployee.birth_date,
+                        gender = lynksEmployee.gender,
+                        is_driver = lynksEmployee.is_driver,
+                        is_working_in_department = lynksEmployee.is_working_in_department
+                    };
+
+                    // Remove old record and add new one
+                    _lynksDbContext.EmployeesByDepartment.Remove(lynksEmployee);
+                    _lynksDbContext.EmployeesByDepartment.Add(newEmployeeRecord);
+
+                    syncResults.Add("Отдел (Department)");
+                }
+                else if (lynksDepartmentId.HasValue)
+                {
+                    syncResults.Add("Отдел (Department) - без изменений");
+                }
+
+                // Step 9: Save changes to database
+                await _lynksDbContext.SaveChangesAsync();
+
+                _logger.LogInformation($"Successfully synchronized ALL fields for employee {personnelNumber}");
+
+                // Step 10: Return success response
                 return Ok(new
                 {
-                    Message = $"Synchronization endpoint ready for employee {personnelNumber}",
-                    Status = "Not yet implemented",
+                    Success = true,
+                    Message = $"Employee {personnelNumber} successfully synchronized from TransElectro to LYNKS (ALL fields)",
                     PersonnelNumber = personnelNumber,
-                    RequestedFields = syncRequest?.FieldsToSync ?? new List<string>()
+                    SyncedFields = syncResults,
+                    SyncDirection = "TransElectro → LYNKS",
+                    SyncedData = new
+                    {
+                        FullName = transElectroEmployee.FullName,
+                        Position = transElectroEmployee.Position?.Name,
+                        Email = transElectroEmployee.Email,
+                        Department = transElectroEmployee.Department?.Name
+                    }
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error synchronizing employee {personnelNumber}");
-                return StatusCode(500, "Internal server error while synchronizing employee");
+                return StatusCode(500, new
+                {
+                    Success = false,
+                    Message = "Internal server error while synchronizing employee",
+                    PersonnelNumber = personnelNumber,
+                    Error = ex.Message
+                });
             }
         }
 
@@ -453,21 +607,20 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     /// <summary>
     /// Request model for employee synchronization
     /// </summary>
+    /// <summary>
+    /// Simplified request model for employee synchronization (all or nothing approach)
+    /// </summary>
     public class EmployeeSyncRequest
     {
         /// <summary>
-        /// List of fields to synchronize
-        /// </summary>
-        public List<string> FieldsToSync { get; set; } = new List<string>();
-
-        /// <summary>
         /// Direction of synchronization (ToLynks, ToTransElectro)
+        /// Note: Currently only ToLynks is implemented
         /// </summary>
         public string SyncDirection { get; set; } = "ToLynks";
 
         /// <summary>
-        /// Whether to overwrite existing data
+        /// Whether to overwrite existing data (always true for conflict resolution)
         /// </summary>
-        public bool OverwriteExisting { get; set; } = false;
+        public bool OverwriteExisting { get; set; } = true;
     }
 }
