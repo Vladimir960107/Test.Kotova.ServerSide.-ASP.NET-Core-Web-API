@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using System.ComponentModel.DataAnnotations;
+using Kotova.CommonClasses;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 {
