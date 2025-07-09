@@ -3587,5 +3587,276 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
         #endregion
 
+        #region Coordinator stuff
+
+        /// <summary>
+        /// Inserts a new employee into the database
+        /// </summary>
+        /// <remarks>
+        /// This endpoint allows authorized users (Coordinators, Chiefs of Departments, or Administrators) to add a new employee
+        /// to the database. If the addInitialInstruction flag is provided in the request, it will automatically 
+        /// create and assign an initial instruction to the new employee.
+        /// </remarks>
+        /// <param name="employee">The employee details to be added</param>
+        /// <param name="addInitialInstruction">Optional query parameter to automatically create initial instruction</param>
+        /// <returns>
+        /// Returns success message if employee was created successfully, or appropriate error responses.
+        /// </returns>
+        /// <response code="200">The employee was successfully added to the database</response>
+        /// <response code="400">The employee data is invalid or there was an error processing the request</response>
+        /// <response code="401">The user is not authenticated</response>
+        /// <response code="403">The user doesn't have permission to add employees</response>
+        /// <response code="500">Internal server error occurred during employee creation</response>
+        [HttpPost("insert-new-employee")]
+        [Authorize(Roles = "Coordinator, Administrator")]
+        public async Task<IActionResult> InsertNewEmployee(
+            [FromBody] Employee employee,
+            [FromQuery] bool addInitialInstruction = false)
+        {
+            try
+            {
+                if (employee == null)
+                {
+                    return BadRequest("Employee data is missing");
+                }
+
+                // Get current user information
+                var username = User.FindFirst(ClaimTypes.Name)?.Value;
+                if (string.IsNullOrEmpty(username))
+                {
+                    return Unauthorized("Username claim not found");
+                }
+
+                var currentUser = await _dbContext.Users
+                    .Include(u => u.Department)
+                    .Include(u => u.Personnel)
+                    .FirstOrDefaultAsync(u => u.username == username);
+
+                if (currentUser == null)
+                {
+                    return BadRequest("User not found in database");
+                }
+
+                // Validate employee data
+                if (string.IsNullOrWhiteSpace(employee.full_name) ||
+                    string.IsNullOrWhiteSpace(employee.personnel_number) ||
+                    string.IsNullOrWhiteSpace(employee.department))
+                {
+                    return BadRequest("Required employee fields are missing (full_name, personnel_number, department)");
+                }
+
+                // Check if employee with this personnel number already exists
+                var existingEmployee = await _dbContext.Personnel
+                    .FirstOrDefaultAsync(p => p.personnel_number == employee.personnel_number);
+
+                if (existingEmployee != null)
+                {
+                    return BadRequest($"Employee with personnel number {employee.personnel_number} already exists");
+                }
+
+                // Get department ID by name
+                var department = await _dbContext.Departments
+                    .FirstOrDefaultAsync(d => d.department_name == employee.department);
+
+                if (department == null)
+                {
+                    return BadRequest($"Department '{employee.department}' not found");
+                }
+
+                // Create execution strategy for transaction handling
+                var strategy = _dbContext.Database.CreateExecutionStrategy();
+
+                return await strategy.ExecuteAsync(async () =>
+                {
+                    using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
+                    try
+                    {
+                        // Step 1: Create Personnel record
+                        var personnel = new Personnel
+                        {
+                            personnel_number = employee.personnel_number
+                        };
+
+                        _dbContext.Personnel.Add(personnel);
+                        await _dbContext.SaveChangesAsync();
+
+                        // Step 2: Create EmployeeByDepartment record
+                        var employeeByDept = new EmployeeByDepartment
+                        {
+                            personnel_id = personnel.personnel_id,
+                            department_id = department.department_id,
+                            full_name = employee.full_name,
+                            job_position = employee.job_position ?? "Не указано",
+                            group = employee.group,
+                            birth_date = employee.birth_date,
+                            gender = employee.gender ?? 3,
+                            is_driver = employee.is_driver,
+                            is_working_in_department = employee.is_working_in_department ?? true
+                        };
+
+                        _dbContext.EmployeesByDepartment.Add(employeeByDept);
+                        await _dbContext.SaveChangesAsync();
+
+                        // Step 3: Handle initial instruction if requested (ЗАГЛУШКА)
+                        if (addInitialInstruction)
+                        {
+                            await HandleInitialInstructionForNewEmployee(personnel, department, currentUser);
+                        }
+
+                        // Step 4: Handle User credentials and insert into Management.user
+
+                        await transaction.CommitAsync();
+
+                        _logger.LogInformation($"Successfully created employee: {employee.full_name} with personnel number: {employee.personnel_number}");
+
+                        return Ok(new
+                        {
+                            Message = "Employee successfully added to database",
+                            PersonnelId = personnel.personnel_id,
+                            PersonnelNumber = personnel.personnel_number,
+                            FullName = employee.full_name,
+                            Department = employee.department,
+                            InitialInstructionCreated = addInitialInstruction
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        _logger.LogError(ex, $"Error creating employee: {employee.full_name}");
+                        throw;
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in InsertNewEmployee endpoint");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ЗАГЛУШКА: Handles initial instruction creation and assignment for new employee
+        /// </summary>
+        /// <param name="personnel">The newly created personnel record</param>
+        /// <param name="department">The department the employee belongs to</param>
+        /// <param name="currentUser">The user who created the employee</param>
+        private async Task HandleInitialInstructionForNewEmployee(
+            Personnel personnel,
+            Models.Department department,
+            User currentUser)
+        {
+            try
+            {
+                _logger.LogInformation($"Creating initial instruction for new employee: {personnel.personnel_number}");
+
+                // Step 1: Check if initial instruction already exists for this department
+                var existingInitialInstruction = await _dbContext.Instructions
+                    .FirstOrDefaultAsync(i =>
+                        i.department_id == department.department_id &&
+                        i.type_of_instruction == 0 && // 0 = Вводный (Initial/Introductory)
+                        i.end_date > DateTime.Now); // Still valid
+
+                int instructionId;
+
+                if (existingInitialInstruction != null)
+                {
+                    // Use existing initial instruction
+                    instructionId = existingInitialInstruction.instruction_id;
+                    _logger.LogInformation($"Using existing initial instruction ID: {instructionId}");
+                }
+                else
+                {
+                    // Create new initial instruction
+                    var newInitialInstruction = new Models.Instruction
+                    {
+                        department_id = department.department_id,
+                        begin_date = DateTime.Now.Date,
+                        end_date = DateTime.Now.AddYears(1).Date, // Valid for 1 year
+                        cause_of_instruction = "Вводный инструктаж для новых сотрудников",
+                        type_of_instruction = 0, // 0 = Вводный (Initial/Introductory)
+                        is_assigned_to_people = true,
+                        is_passed_by_everyone = false,
+                        is_passed_by_chief_unplanned_instr = true // Auto-approve for initial instructions
+                    };
+
+                    _dbContext.Instructions.Add(newInitialInstruction);
+                    await _dbContext.SaveChangesAsync();
+
+                    instructionId = newInitialInstruction.instruction_id;
+                    _logger.LogInformation($"Created new initial instruction ID: {instructionId}");
+                }
+
+                // Step 2: Assign initial instruction to the new employee
+                var instructionStatus = new InstructionStatus
+                {
+                    personnel_id = personnel.personnel_id,
+                    department_id = department.department_id,
+                    instruction_id = instructionId,
+                    is_instruction_passed = false, // Employee hasn't passed it yet
+                    date_when_passed = null,
+                    date_when_passed_UTC = null,
+                    when_was_sent_to_user = DateTime.Now,
+                    when_was_sent_to_user_UTC = DateTime.UtcNow,
+                    was_signed_by_personnel_id = currentUser.personnel_id
+                };
+
+                _dbContext.InstructionStatuses.Add(instructionStatus);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation($"Successfully assigned initial instruction to employee: {personnel.personnel_number}");
+
+                // TODO: ЗАГЛУШКА - Add additional logic here if needed
+                // - Send notification to employee
+                // - Create normative instruction associations
+                // - Log the assignment in audit trail
+                // - Send email notification
+                await CreatePlaceholderNotification(personnel, instructionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error handling initial instruction for employee: {personnel.personnel_number}");
+                // Don't throw here - initial instruction failure shouldn't prevent employee creation
+                // Just log the error and continue
+            }
+        }
+
+        /// <summary>
+        /// ЗАГЛУШКА: Creates a placeholder notification for initial instruction assignment
+        /// </summary>
+        /// <param name="personnel">The personnel record</param>
+        /// <param name="instructionId">The instruction ID</param>
+        private async Task CreatePlaceholderNotification(Personnel personnel, int instructionId)
+        {
+            // TODO: ЗАГЛУШКА - Implement notification system
+            // This is where you would:
+            // 1. Send email notification to the new employee
+            // 2. Create system notification
+            // 3. Log the assignment in audit trail
+            // 4. Update dashboard counters
+
+            await Task.Delay(10); // Simulate async operation
+
+            _logger.LogInformation($"ЗАГЛУШКА: Would send notification to personnel {personnel.personnel_number} about instruction {instructionId}");
+
+            // Example of what could be implemented:
+            /*
+            var notification = new
+            {
+                PersonnelId = personnel.personnel_id,
+                InstructionId = instructionId,
+                Type = "InitialInstructionAssignment",
+                CreatedAt = DateTime.UtcNow,
+                Message = "Вам назначен вводный инструктаж"
+            };
+
+            // Save to notifications table
+            // Send email
+            // Update counters
+            */
+        }
+
+        #endregion
+
     }
 }
