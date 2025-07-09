@@ -3699,7 +3699,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         _dbContext.EmployeesByDepartment.Add(employeeByDept);
                         await _dbContext.SaveChangesAsync();
 
-                        // Step 3: Handle initial instruction if requested (ЗАГЛУШКА)
+                        // Step 3: Handle initial instruction if requested
                         if (addInitialInstruction)
                         {
                             await HandleInitialInstructionForNewEmployee(personnel, department, currentUser);
@@ -3719,15 +3719,22 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                         _logger.LogInformation($"Successfully created employee: {employee.FullName} with personnel number: {employee.PersonnelNumber}");
 
-                        return Ok(new
+                        return Ok(new EmployeeCreationResponseDto
                         {
+                            Success = true,
                             Message = "Employee successfully added to database",
                             PersonnelId = personnel.personnel_id,
                             PersonnelNumber = personnel.personnel_number,
                             FullName = employee.FullName,
                             Department = employee.Department,
                             InitialInstructionCreated = addInitialInstruction,
-                            UserCredentials = userCredentials,
+                            UserCredentials = new UserCredentialsInfo
+                            {
+                                Username = userCredentials.Username,
+                                Password = userCredentials.Password,
+                                UserId = userCredentials.UserId,
+                                DeskNumber = userCredentials.DeskNumber ?? ""
+                            }
                         });
                     }
                     catch (Exception ex)
@@ -3745,8 +3752,10 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
 
+
         /// <summary>
-        /// ЗАГЛУШКА: Handles initial instruction creation and assignment for new employee
+        /// Handles initial instruction creation and assignment for new employee
+        /// Fixed to handle unique constraint on cause_of_instruction properly
         /// </summary>
         /// <param name="personnel">The newly created personnel record</param>
         /// <param name="department">The department the employee belongs to</param>
@@ -3758,7 +3767,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         {
             try
             {
-                _logger.LogInformation($"Creating initial instruction for new employee: {personnel.personnel_number}");
+                _logger.LogInformation($"Handling initial instruction for new employee: {personnel.personnel_number}");
 
                 // Step 1: Check if initial instruction already exists for this department
                 var existingInitialInstruction = await _dbContext.Instructions
@@ -3771,63 +3780,102 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
 
                 if (existingInitialInstruction != null)
                 {
-                    // Use existing initial instruction
+                    // Use existing instruction
                     instructionId = existingInitialInstruction.instruction_id;
-                    _logger.LogInformation($"Using existing initial instruction ID: {instructionId}");
+                    _logger.LogInformation($"Using existing initial instruction ID: {instructionId} for department {department.department_name}");
                 }
                 else
                 {
                     // Create new initial instruction
-                    var newInitialInstruction = new Models.Instruction
+                    _logger.LogInformation($"Creating new initial instruction for department: {department.department_name}");
+
+                    // Generate a unique cause string to avoid duplicates
+                    var uniqueCause = $"Вводный инструктаж для новых сотрудников - {department.department_name}";
+
+                    // Double-check that this unique cause doesn't already exist
+                    var duplicateCheck = await _dbContext.Instructions
+                        .FirstOrDefaultAsync(i => i.cause_of_instruction == uniqueCause);
+
+                    if (duplicateCheck != null)
                     {
+                        // If somehow it still exists, append timestamp to make it truly unique
+                        uniqueCause = $"Вводный инструктаж для новых сотрудников - {department.department_name} - {DateTime.UtcNow:yyyyMMddHHmmss}";
+                    }
+
+                    var newInstruction = new Models.Instruction
+                    {
+                        cause_of_instruction = uniqueCause,
+                        begin_date = DateTime.UtcNow,
+                        end_date = DateTime.UtcNow.AddYears(1), // Valid for 1 year
+                        type_of_instruction = 0, // Initial instruction
                         department_id = department.department_id,
-                        begin_date = DateTime.Now.Date,
-                        end_date = DateTime.Now.AddYears(1).Date, // Valid for 1 year
-                        cause_of_instruction = "Вводный инструктаж для новых сотрудников",
-                        type_of_instruction = 0, // 0 = Вводный (Initial/Introductory)
-                        is_assigned_to_people = true,
+                        is_assigned_to_people = false,
                         is_passed_by_everyone = false,
-                        is_passed_by_chief_unplanned_instr = true // Auto-approve for initial instructions
+                        is_passed_by_chief_unplanned_instr = false
                     };
 
-                    _dbContext.Instructions.Add(newInitialInstruction);
+                    _dbContext.Instructions.Add(newInstruction);
                     await _dbContext.SaveChangesAsync();
 
-                    instructionId = newInitialInstruction.instruction_id;
-                    _logger.LogInformation($"Created new initial instruction ID: {instructionId}");
+                    instructionId = newInstruction.instruction_id;
+                    _logger.LogInformation($"Created new initial instruction with ID: {instructionId}");
                 }
 
-                // Step 2: Assign initial instruction to the new employee
-                var instructionStatus = new InstructionStatus
-                {
-                    personnel_id = personnel.personnel_id,
-                    department_id = department.department_id,
-                    instruction_id = instructionId,
-                    is_instruction_passed = false, // Employee hasn't passed it yet
-                    date_when_passed = null,
-                    date_when_passed_UTC = null,
-                    when_was_sent_to_user = DateTime.Now,
-                    when_was_sent_to_user_UTC = DateTime.UtcNow,
-                    was_signed_by_personnel_id = currentUser.personnel_id
-                };
+                // Step 2: Assign this instruction to the new employee
+                await AssignInstructionToEmployee(personnel, instructionId, department.department_id);
 
-                _dbContext.InstructionStatuses.Add(instructionStatus);
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogInformation($"Successfully assigned initial instruction to employee: {personnel.personnel_number}");
-
-                // TODO: ЗАГЛУШКА - Add additional logic here if needed
-                // - Send notification to employee
-                // - Create normative instruction associations
-                // - Log the assignment in audit trail
-                // - Send email notification
-                await CreatePlaceholderNotification(personnel, instructionId);
+                _logger.LogInformation($"Successfully handled initial instruction for employee: {personnel.personnel_number}");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error handling initial instruction for employee: {personnel.personnel_number}");
-                // Don't throw here - initial instruction failure shouldn't prevent employee creation
-                // Just log the error and continue
+                // Don't rethrow - this is not a critical failure that should stop employee creation
+                // The employee can still be created even if initial instruction assignment fails
+            }
+        }
+
+        /// <summary>
+        /// Assigns an instruction to a specific employee
+        /// </summary>
+        /// <param name="personnel">The personnel record</param>
+        /// <param name="instructionId">The instruction ID to assign</param>
+        /// <param name="departmentId">The department ID</param>
+        private async Task AssignInstructionToEmployee(Personnel personnel, int instructionId, int departmentId)
+        {
+            try
+            {
+                // Check if assignment already exists
+                var existingAssignment = await _dbContext.InstructionStatuses
+                    .FirstOrDefaultAsync(s =>
+                        s.personnel_id == personnel.personnel_id &&
+                        s.instruction_id == instructionId);
+
+                if (existingAssignment == null)
+                {
+                    var instructionStatus = new InstructionStatus
+                    {
+                        personnel_id = personnel.personnel_id,
+                        instruction_id = instructionId,
+                        department_id = departmentId,
+                        is_instruction_passed = false,
+                        when_was_sent_to_user = DateTime.Now,
+                        when_was_sent_to_user_UTC = DateTime.UtcNow,
+                    };
+
+                    _dbContext.InstructionStatuses.Add(instructionStatus);
+                    await _dbContext.SaveChangesAsync();
+
+                    _logger.LogInformation($"Assigned instruction {instructionId} to personnel {personnel.personnel_number}");
+                }
+                else
+                {
+                    _logger.LogInformation($"Instruction {instructionId} already assigned to personnel {personnel.personnel_number}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error assigning instruction {instructionId} to personnel {personnel.personnel_number}");
+                throw;
             }
         }
 
