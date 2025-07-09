@@ -3726,7 +3726,8 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                             PersonnelNumber = personnel.personnel_number,
                             FullName = employee.FullName,
                             Department = employee.Department,
-                            InitialInstructionCreated = addInitialInstruction
+                            InitialInstructionCreated = addInitialInstruction,
+                            UserCredentials = userCredentials,
                         });
                     }
                     catch (Exception ex)
