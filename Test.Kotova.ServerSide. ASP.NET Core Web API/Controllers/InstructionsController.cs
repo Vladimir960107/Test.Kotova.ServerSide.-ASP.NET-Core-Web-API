@@ -12,6 +12,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -3610,9 +3611,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
         [HttpPost("insert-new-employee")]
         [Authorize(Roles = "Coordinator, Administrator")]
         public async Task<IActionResult> InsertNewEmployee(
-            [FromBody] Employee employee,
-            [FromQuery] bool addInitialInstruction = false)
-        {
+    [FromBody] EmployeeCreationDto employee,  // Changed to EmployeeCreationDto
+    [FromQuery] bool addInitialInstruction = false)
+        { 
             try
             {
                 if (employee == null)
@@ -3638,29 +3639,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                 }
 
                 // Validate employee data
-                if (string.IsNullOrWhiteSpace(employee.full_name) ||
-                    string.IsNullOrWhiteSpace(employee.personnel_number) ||
-                    string.IsNullOrWhiteSpace(employee.department))
+                if (string.IsNullOrWhiteSpace(employee.FullName) ||
+                    string.IsNullOrWhiteSpace(employee.PersonnelNumber) ||
+                    string.IsNullOrWhiteSpace(employee.Department))
                 {
                     return BadRequest("Required employee fields are missing (full_name, personnel_number, department)");
                 }
 
                 // Check if employee with this personnel number already exists
                 var existingEmployee = await _dbContext.Personnel
-                    .FirstOrDefaultAsync(p => p.personnel_number == employee.personnel_number);
+                    .FirstOrDefaultAsync(p => p.personnel_number == employee.PersonnelNumber);
 
                 if (existingEmployee != null)
                 {
-                    return BadRequest($"Employee with personnel number {employee.personnel_number} already exists");
+                    return BadRequest($"Employee with personnel number {employee.PersonnelNumber} already exists");
                 }
 
                 // Get department ID by name
                 var department = await _dbContext.Departments
-                    .FirstOrDefaultAsync(d => d.department_name == employee.department);
+                    .FirstOrDefaultAsync(d => d.department_name == employee.Department);
 
                 if (department == null)
                 {
-                    return BadRequest($"Department '{employee.department}' not found");
+                    return BadRequest($"Department '{employee.Department}' not found");
                 }
 
                 // Create execution strategy for transaction handling
@@ -3675,7 +3676,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         // Step 1: Create Personnel record
                         var personnel = new Personnel
                         {
-                            personnel_number = employee.personnel_number
+                            personnel_number = employee.PersonnelNumber
                         };
 
                         _dbContext.Personnel.Add(personnel);
@@ -3686,13 +3687,13 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         {
                             personnel_id = personnel.personnel_id,
                             department_id = department.department_id,
-                            full_name = employee.full_name,
-                            job_position = employee.job_position ?? "Не указано",
-                            group = employee.group,
-                            birth_date = employee.birth_date,
-                            gender = employee.gender ?? 3,
-                            is_driver = employee.is_driver,
-                            is_working_in_department = employee.is_working_in_department ?? true
+                            full_name = employee.FullName,
+                            job_position = employee.JobPosition ?? "Не указано",
+                            group = employee.Group,
+                            birth_date = employee.BirthDate,
+                            gender = employee.Gender ?? 3,
+                            is_driver = employee.IsDriver,
+                            is_working_in_department = employee.IsWorkingInDepartment ?? true
                         };
 
                         _dbContext.EmployeesByDepartment.Add(employeeByDept);
@@ -3705,25 +3706,33 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         }
 
                         // Step 4: Handle User credentials and insert into Management.user
+                        var userCredentials = await CreateUserCredentialsForNewEmployee(personnel, department, employee);
+                        if (userCredentials == null)
+                        {
+                            throw new Exception("Failed to create user credentials for new employee");
+                        }
+
+                        _logger.LogInformation($"Successfully created user credentials for employee: {employee.FullName}, Username: {userCredentials.Username}");
+
 
                         await transaction.CommitAsync();
 
-                        _logger.LogInformation($"Successfully created employee: {employee.full_name} with personnel number: {employee.personnel_number}");
+                        _logger.LogInformation($"Successfully created employee: {employee.FullName} with personnel number: {employee.PersonnelNumber}");
 
                         return Ok(new
                         {
                             Message = "Employee successfully added to database",
                             PersonnelId = personnel.personnel_id,
                             PersonnelNumber = personnel.personnel_number,
-                            FullName = employee.full_name,
-                            Department = employee.department,
+                            FullName = employee.FullName,
+                            Department = employee.Department,
                             InitialInstructionCreated = addInitialInstruction
                         });
                     }
                     catch (Exception ex)
                     {
                         await transaction.RollbackAsync();
-                        _logger.LogError(ex, $"Error creating employee: {employee.full_name}");
+                        _logger.LogError(ex, $"Error creating employee: {employee.FullName}");
                         throw;
                     }
                 });
@@ -3855,6 +3864,269 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             // Update counters
             */
         }
+
+        /// <summary>
+        /// Creates user credentials and inserts the user into Management.users table
+        /// </summary>
+        /// <param name="personnel">The personnel record</param>
+        /// <param name="department">The department</param>
+        /// <param name="employee">The employee data (EmployeeCreationDto)</param>
+        /// <returns>Generated user credentials or null if failed</returns>
+        private async Task<UserCredentialsResult> CreateUserCredentialsForNewEmployee(
+            Personnel personnel,
+            Models.Department department,
+            EmployeeCreationDto employee)
+        {
+            try
+            {
+                // Generate username based on employee data
+                var username = GenerateUsername(employee);
+
+                // Check if username already exists and make it unique if needed
+                username = await EnsureUniqueUsername(username);
+
+                // Generate a secure random password
+                var password = GenerateSecurePassword(username);
+
+                // Hash the password using BCrypt
+                var passwordHash = Encryption_Kotova.HashPassword(password);
+
+                // Determine user role ID based on employee role
+                var userRoleId = GetUserRoleId(employee.Role);
+
+                // Use workplace number from DTO or generate desk number
+                var deskNumber = employee.WorkplaceNumber ?? GenerateDeskNumber(department.department_name, employee.FullName);
+
+                // Create new user entity
+                var user = new User
+                {
+                    username = username,
+                    password_hash = passwordHash,
+                    user_role_id = userRoleId,
+                    personnel_id = personnel.personnel_id,
+                    current_email = employee.Email, // EmployeeCreationDto has Email property
+                    department_id = department.department_id,
+                    desk_number = deskNumber
+                };
+
+                // Insert user into database
+                _dbContext.Users.Add(user);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation($"User created successfully: Username={username}, Role={userRoleId}, Department={department.department_id}");
+
+                return new UserCredentialsResult
+                {
+                    Username = username,
+                    Password = password, // Return plain password for initial setup (should be securely communicated)
+                    UserId = user.id,
+                    DeskNumber = deskNumber,
+                    Success = true
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error creating user credentials for employee: {employee.FullName}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Generates a username based on employee information
+        /// </summary>
+        /// <param name="employee">The employee data (EmployeeCreationDto)</param>
+        /// <returns>Generated username</returns>
+        private string GenerateUsername(EmployeeCreationDto employee)
+        {
+            // Generate username based on full name
+            // Example: "Иванов Иван Иванович" -> "ivanov.ivan"
+            var nameParts = employee.FullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (nameParts.Length >= 2)
+            {
+                var lastName = TransliterateToLatin(nameParts[0]).ToLower();
+                var firstName = TransliterateToLatin(nameParts[1]).ToLower();
+                return $"{lastName}.{firstName}";
+            }
+            else
+            {
+                // Fallback: use personnel number
+                return $"user.{employee.PersonnelNumber}";
+            }
+        }
+
+        /// <summary>
+        /// Ensures the username is unique by appending numbers from 00 to 99 if needed
+        /// </summary>
+        /// <param name="baseUsername">The base username</param>
+        /// <returns>Unique username or throws exception if all numbers 00-99 are taken</returns>
+        private async Task<string> EnsureUniqueUsername(string baseUsername)
+        {
+            // First check if base username is available
+            if (!await _dbContext.Users.AnyAsync(u => u.username == baseUsername))
+            {
+                return $"{baseUsername}.00";
+            }
+
+            // Try numbers from 00 to 99
+            for (int i = 0; i <= 99; i++)
+            {
+                var numberSuffix = i.ToString("D2"); // Format as 2-digit number with leading zero
+                var username = $"{baseUsername}.{numberSuffix}";
+
+                if (!await _dbContext.Users.AnyAsync(u => u.username == username))
+                {
+                    return username;
+                }
+            }
+
+            // If we reach here, all usernames from .00 to .99 are taken
+            var nameParts = baseUsername.Split('.');
+            var lastName = nameParts.Length > 0 ? nameParts[0] : "unknown";
+            var firstName = nameParts.Length > 1 ? nameParts[1] : "unknown";
+
+            throw new Exception($"Не удалось создать уникальное имя пользователя для сотрудника с именем '{firstName}' и фамилией '{lastName}'. " +
+                               $"Все варианты от {baseUsername}.00 до {baseUsername}.99 уже заняты. " +
+                               $"Обратитесь к администратору для решения данной проблемы.");
+        }
+
+        /// <summary>
+        /// Generates a secure random password
+        /// </summary>
+        /// <returns>Secure password</returns>
+        private string GenerateSecurePassword(string username)
+        {
+            // Password is the same as username for easier initial use
+            return username;
+        }
+
+        /// <summary>
+        /// Maps employee role to user role ID
+        /// </summary>
+        /// <param name="employeeRole">The employee role from NewEmployeeDto</param>
+        /// <returns>User role ID</returns>
+        private int GetUserRoleId(string employeeRole)
+        {
+            // Map based on role_names table:
+            // 1 = User (Сотрудник)
+            // 2 = ChiefOfDepartment (Начальник отдела)
+            // 3 = Coordinator (Координатор)
+            // 4 = Management (Главный инженер)
+            // 5 = Admin (Администратор)
+            // 6 = DeputyChief (Заместитель начальника)
+
+            return employeeRole?.ToLower() switch
+            {
+                "administrator" or "admin" or "администратор" => 5,
+                "coordinator" or "координатор" => 3,
+                "chiefofdepartment" or "начальник отдела" => 2,
+                "deputychief" or "заместитель начальника" => 6,
+                "management" or "главный инженер" => 4,
+                _ => 1 // Default to User role
+            };
+        }
+
+        /// <summary>
+        /// Generates a desk number for the employee
+        /// </summary>
+        /// <param name="departmentName">Department name</param>
+        /// <param name="fullName">Employee full name</param>
+        /// <returns>Generated desk number</returns>
+        private string GenerateDeskNumber(string departmentName, string fullName)
+        {
+            // Generate desk number based on department and employee
+            var deptCode = departmentName switch
+            {
+                "Общестроительный отдел" => "CONST",
+                "Технический отдел" => "TECH",
+                "Отдел охраны труда" => "HSE",
+                "Руководство" => "MGT",
+                _ => "GEN"
+            };
+
+            // Use a simple counter or hash for uniqueness
+            var hash = Math.Abs(fullName.GetHashCode()) % 1000;
+            return $"{deptCode}-{hash:D3}";
+        }
+
+        /// <summary>
+        /// Simple transliteration from Cyrillic to Latin characters
+        /// </summary>
+        /// <param name="text">Text in Cyrillic</param>
+        /// <returns>Transliterated text in Latin</returns>
+        private string TransliterateToLatin(string text)
+        {
+            var transliteration = new Dictionary<char, string>
+    {
+        {'а', "a"}, {'б', "b"}, {'в', "v"}, {'г', "g"}, {'д', "d"},
+        {'е', "e"}, {'ё', "yo"}, {'ж', "zh"}, {'з', "z"}, {'и', "i"},
+        {'й', "y"}, {'к', "k"}, {'л', "l"}, {'м', "m"}, {'н', "n"},
+        {'о', "o"}, {'п', "p"}, {'р', "r"}, {'с', "s"}, {'т', "t"},
+        {'у', "u"}, {'ф', "f"}, {'х', "kh"}, {'ц', "ts"}, {'ч', "ch"},
+        {'ш', "sh"}, {'щ', "shch"}, {'ъ', ""}, {'ы', "y"}, {'ь', ""},
+        {'э', "e"}, {'ю', "yu"}, {'я', "ya"},
+        {'А', "A"}, {'Б', "B"}, {'В', "V"}, {'Г', "G"}, {'Д', "D"},
+        {'Е', "E"}, {'Ё', "Yo"}, {'Ж', "Zh"}, {'З', "Z"}, {'И', "I"},
+        {'Й', "Y"}, {'К', "K"}, {'Л', "L"}, {'М', "M"}, {'Н', "N"},
+        {'О', "O"}, {'П', "P"}, {'Р', "R"}, {'С', "S"}, {'Т', "T"},
+        {'У', "U"}, {'Ф', "F"}, {'Х', "Kh"}, {'Ц', "Ts"}, {'Ч', "Ch"},
+        {'Ш', "Sh"}, {'Щ', "Shch"}, {'Ъ', ""}, {'Ы', "Y"}, {'Ь', ""},
+        {'Э', "E"}, {'Ю', "Yu"}, {'Я', "Ya"}
+    };
+
+            var result = new StringBuilder();
+            foreach (char c in text)
+            {
+                if (transliteration.ContainsKey(c))
+                {
+                    result.Append(transliteration[c]);
+                }
+                else
+                {
+                    result.Append(c);
+                }
+            }
+
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Result class for user credentials creation
+        /// </summary>
+        public class UserCredentialsResult
+        {
+            public string Username { get; set; }
+            public string Password { get; set; }
+            public int UserId { get; set; }
+            public string? DeskNumber { get; set; }
+            public bool Success { get; set; }
+        }
+
+        // Optional: Add this method to return credentials to client if needed
+        /// <summary>
+        /// Gets the generated credentials for the newly created employee
+        /// </summary>
+        /// <param name="personnelId">Personnel ID</param>
+        /// <returns>User credentials</returns>
+        private async Task<UserCredentialsResult> GetEmployeeCredentials(int personnelId)
+        {
+            var user = await _dbContext.Users
+                .FirstOrDefaultAsync(u => u.personnel_id == personnelId);
+
+            if (user != null)
+            {
+                return new UserCredentialsResult
+                {
+                    Username = user.username,
+                    Password = "***", // Don't return actual password after creation
+                    UserId = user.id,
+                    Success = true
+                };
+            }
+
+            return null;
+        }
+
 
         #endregion
 
