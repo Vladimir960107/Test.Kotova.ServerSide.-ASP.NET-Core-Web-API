@@ -11,12 +11,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
     [Route("api/[controller]")]
     public class DataDownloadController : ControllerBase
     {
-        private readonly LynksDbContext _dbContext;
+        private readonly IDbContextFactory<LynksDbContext> _dbContextFactory;
         private readonly ILogger<DataDownloadController> _logger;
 
-        public DataDownloadController(LynksDbContext dbContext, ILogger<DataDownloadController> logger)
+        public DataDownloadController(
+            IDbContextFactory<LynksDbContext> dbContextFactory,
+            ILogger<DataDownloadController> logger)
         {
-            _dbContext = dbContext;
+            _dbContextFactory = dbContextFactory;
             _logger = logger;
         }
 
@@ -41,7 +43,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 _logger.LogInformation("Retrieving all departments for data download");
 
-                var departments = await _dbContext.Departments
+                using var context = _dbContextFactory.CreateDbContext();
+
+                var departments = await context.Departments
                     .Select(d => new DepartmentDownloadDto
                     {
                         DepartmentId = d.department_id,
@@ -95,7 +99,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 _logger.LogInformation("Retrieving all roles for data download");
 
-                var roles = await _dbContext.Roles
+                using var context = _dbContextFactory.CreateDbContext();
+
+                var roles = await context.Roles
                     .Select(r => new RoleDownloadDto
                     {
                         RoleId = r.role_id,
@@ -147,7 +153,12 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             {
                 _logger.LogInformation("Retrieving departments and roles for combined data download");
 
-                var departmentsTask = _dbContext.Departments
+                // Create separate DbContext instances for parallel operations
+                using var departmentContext = _dbContextFactory.CreateDbContext();
+                using var roleContext = _dbContextFactory.CreateDbContext();
+
+                // Execute both queries in parallel using separate contexts
+                var departmentsTask = departmentContext.Departments
                     .Select(d => new DepartmentDownloadDto
                     {
                         DepartmentId = d.department_id,
@@ -159,7 +170,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     .OrderBy(d => d.DepartmentId)
                     .ToListAsync();
 
-                var rolesTask = _dbContext.Roles
+                var rolesTask = roleContext.Roles
                     .Select(r => new RoleDownloadDto
                     {
                         RoleId = r.role_id,
@@ -169,6 +180,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     .OrderBy(r => r.RoleId)
                     .ToListAsync();
 
+                // Wait for both operations to complete
                 await Task.WhenAll(departmentsTask, rolesTask);
 
                 var departments = await departmentsTask;
@@ -203,6 +215,4 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
             }
         }
     }
-
-    
 }

@@ -1,8 +1,9 @@
-﻿using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
 
 namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
 {
@@ -15,17 +16,29 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
             this IServiceCollection services,
             IConfiguration configuration)
         {
+            var connectionString = configuration.GetConnectionString("LynksDBConnection");
+
+            // Configure shared options
+            Action<SqlServerDbContextOptionsBuilder> sqlOptions = sqlBuilder =>
+            {
+                sqlBuilder.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorNumbersToAdd: null);
+            };
+
+            // Register the regular DbContext (for controllers that still use it)
             services.AddDbContext<LynksDbContext>(options =>
-                options.UseSqlServer(
-                    configuration.GetConnectionString("LynksDBConnection"),
-                    sqlOptions =>
-                    {
-                        sqlOptions.EnableRetryOnFailure(
-                            maxRetryCount: 5,
-                            maxRetryDelay: TimeSpan.FromSeconds(30),
-                            errorNumbersToAdd: null);
-                    }
-                ));
+                options.UseSqlServer(connectionString, sqlOptions));
+
+            // Register the DbContextFactory for controllers that need concurrent operations
+            // Use a separate registration that doesn't depend on the scoped DbContextOptions
+            services.AddSingleton<IDbContextFactory<LynksDbContext>>(provider =>
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<LynksDbContext>();
+                optionsBuilder.UseSqlServer(connectionString, sqlOptions);
+                return new PooledDbContextFactory<LynksDbContext>(optionsBuilder.Options);
+            });
 
             return services;
         }
@@ -37,20 +50,27 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
             this IServiceCollection services,
             IConfiguration configuration)
         {
-            services.AddDbContext<TransElectroDbContext>(options =>
-                options.UseSqlServer(
-                    configuration.GetConnectionString("TransElectroDBConnection"),
-                    sqlOptions =>
-                    {
-                        sqlOptions.EnableRetryOnFailure(
-                            maxRetryCount: 5,
-                            maxRetryDelay: TimeSpan.FromSeconds(30),
-                            errorNumbersToAdd: null);
+            var connectionString = configuration.GetConnectionString("TransElectroDBConnection");
 
-                        // Set command timeout for potentially large data operations
-                        sqlOptions.CommandTimeout(120);
-                    }
-                ));
+            // Configure shared options
+            Action<SqlServerDbContextOptionsBuilder> sqlOptions = sqlBuilder =>
+            {
+                sqlBuilder.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorNumbersToAdd: null);
+            };
+
+            services.AddDbContext<TransElectroDbContext>(options =>
+                options.UseSqlServer(connectionString, sqlOptions));
+
+            // Also add factory for TransElectro if needed for concurrent operations
+            services.AddSingleton<IDbContextFactory<TransElectroDbContext>>(provider =>
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<TransElectroDbContext>();
+                optionsBuilder.UseSqlServer(connectionString, sqlOptions);
+                return new PooledDbContextFactory<TransElectroDbContext>(optionsBuilder.Options);
+            });
 
             return services;
         }
@@ -117,10 +137,5 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
 
             return serviceProvider;
         }
-
-        /// <summary>
-        /// Creates sync log table in TELP database if it doesn't exist
-        /// </summary>
-        
     }
 }
