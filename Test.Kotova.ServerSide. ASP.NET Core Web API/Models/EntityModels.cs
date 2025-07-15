@@ -332,6 +332,88 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Models
     }
 
 
+    // <summary>
+    /// Entity model for tracking employee synchronization status between TELP and LYNKS databases
+    /// </summary>
+    [Table("employee_sync_status", Schema = "Management")]
+    public class EmployeeSyncStatus
+    {
+        /// <summary>
+        /// Primary key - references personnel_id from Personnel table
+        /// </summary>
+        [Key]
+        public int personnel_id { get; set; }
+
+        /// <summary>
+        /// Last successful synchronization date and time
+        /// </summary>
+        public DateTime? last_sync_datetime { get; set; }
+
+        /// <summary>
+        /// Current synchronization status
+        /// Possible values: 'synced', 'failed', 'pending', 'never_synced'
+        /// </summary>
+        [Required]
+        [StringLength(20)]
+        public string sync_status { get; set; } = "never_synced";
+
+        /// <summary>
+        /// Last modification timestamp from TELP database to detect changes
+        /// </summary>
+        public DateTime? telp_last_modified { get; set; }
+
+        /// <summary>
+        /// Last modification timestamp from LYNKS database to detect changes
+        /// </summary>
+        public DateTime? lynks_last_modified { get; set; }
+
+        /// <summary>
+        /// JSON string containing fields that failed to sync
+        /// </summary>
+        [Column(TypeName = "nvarchar(max)")]
+        public string? failed_fields { get; set; }
+
+        /// <summary>
+        /// Number of sync attempts made
+        /// </summary>
+        [Required]
+        public int sync_attempts { get; set; } = 0;
+
+        /// <summary>
+        /// Last error message if sync failed
+        /// </summary>
+        [Column(TypeName = "nvarchar(max)")]
+        public string? last_error_message { get; set; }
+
+        /// <summary>
+        /// Navigation property to Personnel entity
+        /// </summary>
+        [ForeignKey("personnel_id")]
+        public virtual Personnel? Personnel { get; set; }
+    }
+
+    /// <summary>
+    /// Enum for sync status values (for type safety)
+    /// </summary>
+    public enum SyncStatus
+    {
+        Synced,
+        Failed,
+        Pending,
+        NeverSynced
+    }
+
+    /// <summary>
+    /// Helper class for sync status string values
+    /// </summary>
+    public static class SyncStatusConstants
+    {
+        public const string Synced = "synced";
+        public const string Failed = "failed";
+        public const string Pending = "pending";
+        public const string NeverSynced = "never_synced";
+    }
+
 
 
     #region Normative Instructions

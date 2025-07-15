@@ -138,4 +138,36 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions
             return serviceProvider;
         }
     }
+    /// <summary>
+    /// Extension methods for service registration
+    /// </summary>
+    public static class ServiceCollectionExtensions
+    {
+        /// <summary>
+        /// Register Employee Sync services
+        /// </summary>
+        /// <param name="services">Service collection</param>
+        /// <returns>Service collection for chaining</returns>
+        public static IServiceCollection AddEmployeeSyncServices(this IServiceCollection services)
+        {
+            services.AddScoped<IEmployeeSyncService, EmployeeSyncService>();
+            return services;
+        }
+
+        /// <summary>
+        /// Register all LYNKS services including Employee Sync
+        /// </summary>
+        /// <param name="services">Service collection</param>
+        /// <returns>Service collection for chaining</returns>
+        public static IServiceCollection AddLynksServices(this IServiceCollection services)
+        {
+            // Register existing services
+            services.AddScoped<ILynksDbService, LynksDbService>();
+
+            // Register new Employee Sync service
+            services.AddEmployeeSyncServices();
+
+            return services;
+        }
+    }
 }

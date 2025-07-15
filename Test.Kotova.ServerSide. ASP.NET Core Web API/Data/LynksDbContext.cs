@@ -9,6 +9,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
         {
         }
 
+        // Existing DbSets
         public DbSet<Department> Departments { get; set; }
         public DbSet<Personnel> Personnel { get; set; }
         public DbSet<EmployeeByDepartment> EmployeesByDepartment { get; set; }
@@ -22,9 +23,14 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
         public DbSet<User> Users { get; set; }
         public DbSet<Models.Task> Tasks { get; set; }
 
+        // NEW: Employee Sync Status DbSet
+        public DbSet<EmployeeSyncStatus> EmployeeSyncStatuses { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Existing configurations
 
             // Configure composite key for EmployeeByDepartment
             modelBuilder.Entity<EmployeeByDepartment>()
@@ -54,7 +60,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .HasIndex(i => new { i.personnel_id, i.instruction_id })
                 .IsUnique();
 
-            // Configure default values
+            // Configure default values for existing entities
             modelBuilder.Entity<Department>()
                 .Property(d => d.is_chief_online)
                 .HasDefaultValue(false);
@@ -71,10 +77,49 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data
                 .Property(n => n.created_at)
                 .HasDefaultValueSql("GETDATE()");
 
-            // Add this new configuration for the is_unplanned_instruction column
             modelBuilder.Entity<NormativeInstructionName>()
                 .Property(n => n.is_unplanned_instruction)
                 .HasDefaultValue(false);
+
+            // NEW: Configure EmployeeSyncStatus entity
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .HasKey(e => e.personnel_id);
+
+            // Configure foreign key relationship with Personnel
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .HasOne(e => e.Personnel)
+                .WithOne()
+                .HasForeignKey<EmployeeSyncStatus>(e => e.personnel_id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Configure default values for EmployeeSyncStatus
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .Property(e => e.sync_status)
+                .HasDefaultValue("never_synced");
+
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .Property(e => e.sync_attempts)
+                .HasDefaultValue(0);
+
+            // Configure column types for datetime2 fields
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .Property(e => e.last_sync_datetime)
+                .HasColumnType("datetime2(7)");
+
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .Property(e => e.telp_last_modified)
+                .HasColumnType("datetime2(7)");
+
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .Property(e => e.lynks_last_modified)
+                .HasColumnType("datetime2(7)");
+
+            // Add check constraint for sync_status values
+            modelBuilder.Entity<EmployeeSyncStatus>()
+                .HasCheckConstraint(
+                    "CK_EmployeeSyncStatus_SyncStatus",
+                    "[sync_status] IN ('synced', 'failed', 'pending', 'never_synced')"
+                );
 
             /*modelBuilder.Entity<Task>() //TASK IS NOT IMPLEMENTED YET
                 .Property(t => t.created_at)
