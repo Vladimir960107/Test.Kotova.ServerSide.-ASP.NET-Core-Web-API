@@ -210,7 +210,7 @@ var app = builder.Build();
 
 try
 {
-    await app.Services.EnsureDatabasesAvailableAsync();
+    await app.Services.VerifyDatabaseConnectionsAsync();
     Log.Information("Database initialization completed successfully");
 }
 catch (Exception ex)
