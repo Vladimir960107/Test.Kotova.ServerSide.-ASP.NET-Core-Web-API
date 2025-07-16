@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+ï»¿using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
@@ -8,7 +8,7 @@ using System.Text;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Data;
 using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services;
-using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions; // Added for ServiceExtensions
+using Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Extensions; // For ServiceExtensions
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using System.Security.Cryptography.X509Certificates;
@@ -17,7 +17,7 @@ using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-
+// Configure Kestrel server
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenAnyIP(5239); // Set HTTP port
@@ -30,6 +30,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
     });*/
 });
 
+// Configure Serilog
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .WriteTo.File("logs/log.txt", rollingInterval: RollingInterval.Day)
@@ -37,30 +38,39 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// Configure DbContext and DbService using extension methods
+// ================================
+// SERVICE REGISTRATION USING EXTENSIONS
+// ================================
+
+// Option 1: Use individual extension methods (current approach)
 builder.Services.ConfigureLynksDbContext(builder.Configuration);
 builder.Services.ConfigureTransElectroDbContext(builder.Configuration);
 builder.Services.ConfigureLynksDbService();
 
+// Option 2: Use combined extension method (alternative - choose one)
+// builder.Services.AddLynksServices(builder.Configuration);
+
+// Add Controllers with JSON options
 builder.Services.AddControllers()
         .AddJsonOptions(options =>
         {
             //options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
         });
 
+// Add SignalR
 builder.Services.AddSignalR();
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+// Configure Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "My API", Version = "v1" });
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "LYNKS API", Version = "v1" });
 
     // Add JWT Authentication to Swagger
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-        Description = "Ââåäèòå òîêåí â ôîðìàòå 'Bearer {token}'",
+        Description = "Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ Ñ‚Ð¾ÐºÐµÐ½ Ð² Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ðµ 'Bearer {token}'",
         Name = "Authorization",
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
         Scheme = "Bearer"
@@ -80,10 +90,13 @@ builder.Services.AddSwaggerGen(c =>
             new string[] {}
         }
     });
+
+    // Include XML comments for API documentation
     var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     c.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
 });
 
+// Register singleton services
 builder.Services.AddSingleton<ChiefsManager>();
 builder.Services.AddSingleton<JWTTokenValidator>();
 
@@ -91,14 +104,14 @@ builder.Services.AddSingleton<JWTTokenValidator>();
 var jwtSecret = builder.Configuration["JwtConfig:Secret"];
 if (string.IsNullOrEmpty(jwtSecret))
 {
-Log.Error("JWT Secret is missing in configuration");
-throw new InvalidOperationException("JWT Secret is not configured. Please add JwtConfig:Secret to your appsettings.json");
+    Log.Error("JWT Secret is missing in configuration");
+    throw new InvalidOperationException("JWT Secret is not configured. Please add JwtConfig:Secret to your appsettings.json");
 }
 
 var jwtIssuer = builder.Configuration["JwtConfig:Issuer"] ?? "DefaultIssuer";
 var jwtAudience = builder.Configuration["JwtConfig:Audience"] ?? "DefaultAudience";
 
-// Then use these validated settings in your JWT configuration
+// Configure JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -133,6 +146,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+// Configure Authorization policies
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Coordinator", policy =>
@@ -182,24 +196,33 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
+// Register scoped services
 builder.Services.AddScoped<LegacyAuthenticationService>();
 builder.Services.AddScoped<NotificationsService>();
 builder.Services.AddScoped<MyDataService>();
 
+// Build the application
 var app = builder.Build();
 
+// ================================
+// DATABASE INITIALIZATION
+// ================================
 
-try 
+try
 {
     await app.Services.EnsureDatabasesAvailableAsync();
+    Log.Information("Database initialization completed successfully");
 }
 catch (Exception ex)
 {
     Log.Error(ex, "Failed to initialize databases");
     // Decide if you want to continue or stop the application
+    // throw; // Uncomment to stop application on database failure
 }
 
-
+// ================================
+// MIDDLEWARE CONFIGURATION
+// ================================
 
 if (app.Environment.IsDevelopment())
 {
@@ -208,13 +231,14 @@ if (app.Environment.IsDevelopment())
 }
 else
 {
-    // Îãðàíè÷üòå äîñòóï ê Swagger UI â ïðîèçâîäñòâåííîé ñðåäå 
-    //!!!!!!!!!!your-secret-key - çàøèôðóé åãî, äîáàâü â îòäåëüíûé ôàéë è ñïðÿ÷ü!
+    // ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÑŒÑ‚Ðµ Ð´Ð¾ÑÑ‚ÑƒÐ¿ Ðº Swagger UI Ð² Ð¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚Ð²ÐµÐ½Ð½Ð¾Ð¹ ÑÑ€ÐµÐ´Ðµ 
+    //!!!!!!!!!!your-secret-key - Ð·Ð°ÑˆÐ¸Ñ„Ñ€ÑƒÐ¹ ÐµÐ³Ð¾, Ð´Ð¾Ð±Ð°Ð²ÑŒ Ð² Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ñ‹Ð¹ Ñ„Ð°Ð¹Ð» Ð¸ ÑÐ¿Ñ€ÑÑ‡ÑŒ!
     app.UseWhen(context => context.Request.Path.StartsWithSegments("/swagger"), appBuilder =>
     {
         appBuilder.Use(async (context, next) =>
         {
-            if (!context.Request.Headers.ContainsKey("X-Swagger-Auth") || context.Request.Headers["X-Swagger-Auth"] != "your-secret-key")
+            if (!context.Request.Headers.ContainsKey("X-Swagger-Auth") ||
+                context.Request.Headers["X-Swagger-Auth"] != "your-secret-key")
             {
                 context.Response.StatusCode = 401;
                 await context.Response.WriteAsync("Unauthorized");
@@ -226,15 +250,18 @@ else
     });
 
     app.UseSwagger();
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API v1"));
+    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "LYNKS API v1"));
 }
 
 //app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Map your SignalR hub here
+// Map SignalR hub
 app.MapHub<NotificationHub>("/notificationHub");
 
+// Map controllers
 app.MapControllers();
+
+Log.Information("LYNKS Application started successfully");
 app.Run();

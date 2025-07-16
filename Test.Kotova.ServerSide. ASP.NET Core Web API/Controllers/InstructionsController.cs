@@ -2892,7 +2892,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         BeginDate = instruction.begin_date,
                         EndDate = instruction.end_date,
                         CauseOfInstruction = instruction.cause_of_instruction,
-                        TypeOfInstruction = instruction.InstructionType?.name_of_type_instruction ?? "Unknown",
+                        TypeOfInstruction = instruction.type_of_instruction,
                         Persons = new List<PersonStatusDto>()
                     };
 
@@ -3014,7 +3014,7 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                         BeginDate = instruction.begin_date,
                         EndDate = instruction.end_date,
                         CauseOfInstruction = instruction.cause_of_instruction,
-                        TypeOfInstruction = instruction.InstructionType?.name_of_type_instruction ?? "Unknown",
+                        TypeOfInstruction = instruction.type_of_instruction,
                         IsPassedByEveryone = instruction.is_passed_by_everyone,
                         Persons = new List<PersonStatusDto>()
                     };
@@ -3038,7 +3038,6 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Controllers
                     // Calculate passed percentage
                     int totalPersons = instructionForChief.Persons.Count;
                     int passedPersons = instructionForChief.Persons.Count(p => p.Passed);
-                    instructionForChief.PassedPercentage = totalPersons > 0 ? (double)passedPersons / totalPersons * 100 : 0;
 
                     result.Add(instructionForChief);
                 }

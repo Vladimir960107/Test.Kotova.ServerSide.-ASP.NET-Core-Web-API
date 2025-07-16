@@ -8,6 +8,9 @@ namespace Test.Kotova.ServerSide._ASP.NET_Core_Web_API.Services
     /// <summary>
     /// Interface for managing employee synchronization status
     /// </summary>
+    /// <summary>
+    /// Interface for managing employee synchronization status
+    /// </summary>
     public interface IEmployeeSyncService
     {
         // Read operations
